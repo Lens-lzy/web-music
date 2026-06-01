@@ -28,6 +28,8 @@ try { musicSdk.kw = require('./musicSdk/kw') } catch (e) { console.warn('[musicS
 
 const PORT = process.env.PORT || 9277
 const HOST = process.env.HOST || process.env.BIND_HOST || '0.0.0.0'
+// Open self-registration is on by default; set WEB_MUSIC_DISABLE_REGISTER=1 to close it.
+const ALLOW_REGISTER = !process.env.WEB_MUSIC_DISABLE_REGISTER
 const PUBLIC_DIR = path.resolve(__dirname, '..', 'public')
 
 const app = express()
@@ -83,12 +85,24 @@ app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }))
 //  Auth & user management (Navidrome-style)
 // =====================================================================
 
+// public client config (drives whether the register UI is shown)
+app.get('/api/config', (req, res) => res.json({ allowRegister: ALLOW_REGISTER }))
+
 // login -> { token, user }
 app.post('/api/login', wrap(async (req, res) => {
   const { username, password } = req.body || {}
   const u = store.authenticate(username, password)
   if (!u) return res.status(401).json({ error: '用户名或密码错误' })
   res.json({ token: auth.issueToken(u), user: store.publicUser(u) })
+}))
+
+// self-registration (creates a regular member, then auto-logs in) -> { token, user }
+app.post('/api/register', wrap(async (req, res) => {
+  if (!ALLOW_REGISTER) return res.status(403).json({ error: '当前未开放注册，请联系管理员' })
+  const { username, password } = req.body || {}
+  const u = store.createUser({ username, password, isAdmin: false }) // isAdmin from client is ignored
+  const full = store.findById(u.id)
+  res.json({ token: auth.issueToken(full), user: u })
 }))
 
 // who am I (validates token)
@@ -158,10 +172,17 @@ app.delete('/api/admin/users/:id', auth.requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true })
 }))
 
-// reset a member's password / toggle admin
+// reset a member's password. With no body -> generate a random temp password,
+// force the user to change it on next login, and return it so the admin can
+// pass it on. With { newPassword } -> set that specific password.
 app.post('/api/admin/users/:id/password', auth.requireAdmin, wrap(async (req, res) => {
-  store.setPassword(Number(req.params.id), (req.body || {}).newPassword)
-  res.json({ ok: true })
+  const { newPassword } = req.body || {}
+  if (newPassword) {
+    store.setPassword(Number(req.params.id), newPassword)
+    return res.json({ ok: true })
+  }
+  const password = store.adminResetPassword(Number(req.params.id))
+  res.json({ ok: true, password })
 }))
 app.post('/api/admin/users/:id/admin', auth.requireAdmin, wrap(async (req, res) => {
   const u = store.setAdmin(Number(req.params.id), !!(req.body || {}).isAdmin)

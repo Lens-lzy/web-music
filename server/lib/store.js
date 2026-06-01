@@ -125,6 +125,28 @@ const setPassword = (id, newPassword) => {
   return true
 }
 
+// Generate a random, human-friendly password (no ambiguous chars like 0/O/1/l).
+const generatePassword = (len = 10) => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+  const bytes = crypto.randomBytes(len)
+  let out = ''
+  for (let i = 0; i < len; i++) out += chars[bytes[i] % chars.length]
+  return out
+}
+
+// Admin reset: set a random temp password and force the user to change it on
+// next login. Returns the plaintext temp password so the admin can pass it on.
+const adminResetPassword = (id) => {
+  load()
+  const u = findById(id)
+  if (!u) throw new Error('用户不存在')
+  const pw = generatePassword(10)
+  u.passwordHash = hashPassword(pw)
+  u.mustChangePassword = true
+  save()
+  return pw
+}
+
 const setAdmin = (id, isAdmin) => {
   load()
   const u = findById(id)
@@ -388,6 +410,7 @@ const getAllSongs = (userId) => {
 module.exports = {
   load, listUsers, findById, findByUsername,
   createUser, deleteUser, setPassword, setAdmin,
+  generatePassword, adminResetPassword,
   authenticate, publicUser, verifyPassword, hashPassword,
   getPlaylists, getPlaylist, createPlaylist, deletePlaylist, renamePlaylist,
   addToPlaylist, removeFromPlaylist, deleteUserPlaylists, songKey, getAllSongs,

@@ -15,10 +15,28 @@
       <div class="login-box">
         <div class="login-logo">Private FM</div>
         <p class="login-sub">Private Echo · 你的私人电波</p>
-        <input v-model="login.username" @keyup.enter="doLogin" placeholder="用户名" />
-        <input v-model="login.password" @keyup.enter="doLogin" type="password" placeholder="密码" />
-        <button class="login-btn" :disabled="loggingIn" @click="doLogin">{{ loggingIn ? '登录中…' : '登 录' }}</button>
-        <p v-if="login.error" class="login-err">{{ login.error }}</p>
+
+        <!-- 登录 -->
+        <template v-if="authMode==='login'">
+          <input v-model="login.username" @keyup.enter="doLogin" placeholder="用户名" />
+          <input v-model="login.password" @keyup.enter="doLogin" type="password" placeholder="密码" />
+          <button class="login-btn" :disabled="loggingIn" @click="doLogin">{{ loggingIn ? '登录中…' : '登 录' }}</button>
+          <p v-if="login.error" class="login-err">{{ login.error }}</p>
+          <p class="login-switch">
+            <a v-if="allowRegister" @click="switchAuth('register')">没有账号？注册</a>
+            <span class="login-hint">忘记密码？请联系管理员重置</span>
+          </p>
+        </template>
+
+        <!-- 注册 -->
+        <template v-else>
+          <input v-model="reg.username" @keyup.enter="doRegister" placeholder="用户名" />
+          <input v-model="reg.password" @keyup.enter="doRegister" type="password" placeholder="密码(≥4位)" />
+          <input v-model="reg.password2" @keyup.enter="doRegister" type="password" placeholder="确认密码" />
+          <button class="login-btn" :disabled="loggingIn" @click="doRegister">{{ loggingIn ? '注册中…' : '注 册' }}</button>
+          <p v-if="reg.error" class="login-err">{{ reg.error }}</p>
+          <p class="login-switch"><a @click="switchAuth('login')">已有账号？去登录</a></p>
+        </template>
       </div>
     </div>
 
@@ -347,16 +365,24 @@
     </div>
 
     <!-- 成员管理弹窗 -->
-    <div v-if="adminOpen" class="modal-mask" @click.self="adminOpen=false">
+    <div v-if="adminOpen" class="modal-mask" @click.self="closeAdmin">
       <div class="modal">
-        <div class="modal-head"><h3>成员管理</h3><span class="modal-close" @click="adminOpen=false">×</span></div>
+        <div class="modal-head"><h3>成员管理</h3><span class="modal-close" @click="closeAdmin">×</span></div>
         <div class="modal-body">
+          <!-- 重置后显示临时密码，供管理员转告该用户 -->
+          <div v-if="lastReset" class="reset-result">
+            已为 <b>{{ lastReset.username }}</b> 生成临时密码：
+            <code class="temp-pwd">{{ lastReset.password }}</code>
+            <span class="muted">请转告该用户，TA 登录后需自行修改。</span>
+            <span class="modal-close" @click="lastReset=null">×</span>
+          </div>
           <table class="user-table">
-            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
             <tbody>
               <tr v-for="u in users" :key="u.id">
                 <td>{{ u.id }}</td><td>{{ u.username }}</td>
                 <td>{{ u.isAdmin ? '管理员' : '成员' }}</td>
+                <td class="muted">{{ u.mustChangePassword ? '待改密' : '正常' }}</td>
                 <td class="muted">{{ u.createdAt }}</td>
                 <td class="user-ops">
                   <button @click="resetPwd(u)">重置密码</button>
@@ -380,14 +406,18 @@
     </div>
 
     <!-- 修改密码弹窗 -->
-    <div v-if="pwdOpen" class="modal-mask" @click.self="pwdOpen=false">
+    <div v-if="pwdOpen" class="modal-mask" @click.self="pwd.force || (pwdOpen=false)">
       <div class="modal modal-sm">
-        <div class="modal-head"><h3>修改密码</h3><span class="modal-close" @click="pwdOpen=false">×</span></div>
+        <div class="modal-head">
+          <h3>{{ pwd.force ? '请设置新密码' : '修改密码' }}</h3>
+          <span v-if="!pwd.force" class="modal-close" @click="pwdOpen=false">×</span>
+        </div>
         <div class="modal-body">
-          <input v-model="pwd.old" type="password" placeholder="原密码" />
+          <p v-if="pwd.force" class="force-note">{{ pwd.msg }}</p>
+          <input v-model="pwd.old" type="password" :placeholder="pwd.force ? '临时密码（管理员给你的）' : '原密码'" />
           <input v-model="pwd.new" type="password" placeholder="新密码(≥4位)" />
           <button class="primary" @click="changePwd">确认修改</button>
-          <p v-if="pwd.msg" class="admin-msg">{{ pwd.msg }}</p>
+          <p v-if="pwd.msg && !pwd.force" class="admin-msg">{{ pwd.msg }}</p>
         </div>
       </div>
     </div>

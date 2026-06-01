@@ -10,7 +10,7 @@
 - 🎵 **多源取链 + 自动容错**：按优先级依次尝试 7 个音源脚本，**服务端校验返回链接确为音频**，被运营商拦截/失效自动换下一个
 - 🛡️ **源脚本沙箱**：第三方 `latest.js` 跑在 Node `vm` 沙箱里，单个源初始化失败不会拖垮进程
 - 🔊 **音频代理**：补 Referer、跟随 CDN 302、转发 Range（支持拖动进度）
-- 👤 **多用户**：注册/登录、按用户隔离的收藏 / 歌单 / 播放队列 / 历史
+- 👤 **多用户**：自助注册 / 登录 / 改密码，按用户隔离的收藏 / 歌单 / 播放队列 / 历史；密码以 scrypt 加盐哈希存储。忘记密码可联系管理员，在后台**重置为随机临时密码**，用户首次登录被强制改密
 - 📝 歌词、封面、网易云风格 UI（Vue3）
 
 ## 快速开始
@@ -62,6 +62,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now web-music
 | `LX_SOURCE_PRIORITY` | `juhe,lx,grass,flower,huibq,sixyin,ikun` | 取链源尝试顺序 |
 | `WEB_MUSIC_ADMIN_USER` | `admin` | 首次启动创建的超级管理员用户名 |
 | `WEB_MUSIC_ADMIN_PASSWORD` | `password` | 超级管理员初始密码（**生产务必改**） |
+| `WEB_MUSIC_DISABLE_REGISTER` | （空=开放） | 设为任意非空值即关闭自助注册，只能由管理员后台建号 |
 
 ## 外网访问
 
