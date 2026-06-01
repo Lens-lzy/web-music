@@ -55,12 +55,13 @@ _app = createApp({
       authMode: 'login',                 // 'login' | 'register'
       allowRegister: true,
       login: { username: '', password: '', error: '' },
-      reg: { username: '', password: '', password2: '', error: '' },
+      reg: { username: '', password: '', password2: '', inviteCode: '', error: '' },
       loggingIn: false,
       userMenuOpen: false,
       // admin
       adminOpen: false, users: [], adminMsg: '',
       newUser: { username: '', password: '', isAdmin: false },
+      invites: [],                       // 邀请码列表
       lastReset: null,                   // {username, password} 最近一次重置出的临时密码
       pwdOpen: false, pwd: { old: '', new: '', msg: '', force: false },
       // playlists
@@ -120,18 +121,19 @@ _app = createApp({
     },
     async doRegister() {
       this.reg.error = ''
-      const { username, password, password2 } = this.reg
+      const { username, password, password2, inviteCode } = this.reg
       if (!username || !password) { this.reg.error = '请输入用户名和密码'; return }
+      if (!inviteCode || !inviteCode.trim()) { this.reg.error = '请输入邀请码'; return }
       if (password.length < 4) { this.reg.error = '密码至少 4 位'; return }
       if (password !== password2) { this.reg.error = '两次输入的密码不一致'; return }
       this.loggingIn = true
       try {
-        const r = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) })
+        const r = await fetch('/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password, inviteCode: inviteCode.trim() }) })
         const d = await r.json()
         if (!r.ok) { this.reg.error = d.error || '注册失败'; return }
         TOKEN = d.token; localStorage.setItem('token', TOKEN)
         this.user = d.user
-        this.reg = { username: '', password: '', password2: '', error: '' }
+        this.reg = { username: '', password: '', password2: '', inviteCode: '', error: '' }
         await this.initMusic()
       } catch (e) { this.reg.error = '网络错误：' + e.message }
       finally { this.loggingIn = false }
@@ -180,7 +182,24 @@ _app = createApp({
     // ---- admin ----
     async openAdmin() {
       this.userMenuOpen = false; this.adminMsg = ''
-      try { this.users = (await api.get('/api/admin/users')).users; this.adminOpen = true } catch (e) { alert(e.message) }
+      try {
+        this.users = (await api.get('/api/admin/users')).users
+        await this.loadInvites()
+        this.adminOpen = true
+      } catch (e) { alert(e.message) }
+    },
+    async loadInvites() {
+      try { this.invites = (await api.get('/api/admin/invites')).invites || [] } catch (e) {}
+    },
+    async genInvite() {
+      this.adminMsg = ''
+      try { await api.post('/api/admin/invites', {}); await this.loadInvites() } catch (e) { this.adminMsg = e.message }
+    },
+    async delInvite(code) {
+      try { await api.del('/api/admin/invites/' + encodeURIComponent(code)); await this.loadInvites() } catch (e) { this.adminMsg = e.message }
+    },
+    copyText(t) {
+      try { navigator.clipboard.writeText(String(t)); this.toast('已复制：' + t) } catch (e) {}
     },
     async addUser() {
       this.adminMsg = ''

@@ -85,8 +85,9 @@ app.get('/api/health', (req, res) => res.json({ ok: true, ts: Date.now() }))
 //  Auth & user management (Navidrome-style)
 // =====================================================================
 
-// public client config (drives whether the register UI is shown)
-app.get('/api/config', (req, res) => res.json({ allowRegister: ALLOW_REGISTER }))
+// public client config (drives whether the register UI is shown). Registration
+// is invite-only: it always requires a valid invite code.
+app.get('/api/config', (req, res) => res.json({ allowRegister: ALLOW_REGISTER, inviteRequired: true }))
 
 // login -> { token, user }
 app.post('/api/login', wrap(async (req, res) => {
@@ -96,11 +97,14 @@ app.post('/api/login', wrap(async (req, res) => {
   res.json({ token: auth.issueToken(u), user: store.publicUser(u) })
 }))
 
-// self-registration (creates a regular member, then auto-logs in) -> { token, user }
+// invite-only registration: requires a valid, unused invite code. On success
+// creates a regular member, consumes the code, and auto-logs in -> { token, user }
 app.post('/api/register', wrap(async (req, res) => {
   if (!ALLOW_REGISTER) return res.status(403).json({ error: '当前未开放注册，请联系管理员' })
-  const { username, password } = req.body || {}
+  const { username, password, inviteCode } = req.body || {}
+  store.validateInvite(inviteCode)                                   // throws 邀请码无效/已被使用
   const u = store.createUser({ username, password, isAdmin: false }) // isAdmin from client is ignored
+  store.consumeInvite(inviteCode, u.username)                        // mark the code used (only after user created)
   const full = store.findById(u.id)
   res.json({ token: auth.issueToken(full), user: u })
 }))
@@ -187,6 +191,16 @@ app.post('/api/admin/users/:id/password', auth.requireAdmin, wrap(async (req, re
 app.post('/api/admin/users/:id/admin', auth.requireAdmin, wrap(async (req, res) => {
   const u = store.setAdmin(Number(req.params.id), !!(req.body || {}).isAdmin)
   res.json({ user: u })
+}))
+
+// ---- admin: invite codes (single-use, required for registration) ----
+app.get('/api/admin/invites', auth.requireAdmin, (req, res) => res.json({ invites: store.listInvites() }))
+app.post('/api/admin/invites', auth.requireAdmin, wrap(async (req, res) => {
+  res.json({ invite: store.createInvite(req.user.username) })
+}))
+app.delete('/api/admin/invites/:code', auth.requireAdmin, wrap(async (req, res) => {
+  store.deleteInvite(req.params.code)
+  res.json({ ok: true })
 }))
 
 // =====================================================================
@@ -400,7 +414,12 @@ app.get('/api/proxy/audio', auth.requireAuth, (req, res) => {
 
 // ---- static frontend ----
 app.use(express.static(PUBLIC_DIR))
-app.get('*', (req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')))
+// Always serve a fresh index.html (no-cache) so updated asset references take
+// effect immediately — prevents stale cached HTML pointing at old/CDN scripts.
+app.get('*', (req, res) => {
+  res.set('Cache-Control', 'no-cache')
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
+})
 
 // ---- start ----
 sources.loadAll()

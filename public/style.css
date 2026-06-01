@@ -173,6 +173,14 @@ body {
 /* 强制改密提示 */
 .force-note { color: var(--green-bright); font-size: 13px; line-height: 1.6; margin-bottom: 4px; }
 
+/* 邀请码管理 */
+.invite-box { margin-top: 22px; padding-top: 20px; border-top: 1px solid #3a3a3a; }
+.invite-box h4 { font-size: 14px; margin-bottom: 10px; }
+.invite-table { margin-top: 12px; }
+.invite-code { background: #000; color: var(--green-bright); padding: 2px 10px; border-radius: 5px; font-size: 15px; font-weight: 700; letter-spacing: 2px; cursor: pointer; user-select: all; }
+.invite-code:hover { background: #111; }
+.invite-ok { color: var(--green-bright); }
+
 /* ===== 用户菜单 ===== */
 .user-menu { position: relative; }
 .user-name { cursor: pointer; color: #fff; font-size: 14px; user-select: none; font-weight: 600; background: rgba(0,0,0,.6); padding: 6px 12px; border-radius: 500px; }

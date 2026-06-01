@@ -28,11 +28,12 @@
           </p>
         </template>
 
-        <!-- 注册 -->
+        <!-- 注册（需邀请码） -->
         <template v-else>
           <input v-model="reg.username" @keyup.enter="doRegister" placeholder="用户名" />
           <input v-model="reg.password" @keyup.enter="doRegister" type="password" placeholder="密码(≥4位)" />
           <input v-model="reg.password2" @keyup.enter="doRegister" type="password" placeholder="确认密码" />
+          <input v-model="reg.inviteCode" @keyup.enter="doRegister" placeholder="邀请码" />
           <button class="login-btn" :disabled="loggingIn" @click="doRegister">{{ loggingIn ? '注册中…' : '注 册' }}</button>
           <p v-if="reg.error" class="login-err">{{ reg.error }}</p>
           <p class="login-switch"><a @click="switchAuth('login')">已有账号？去登录</a></p>
@@ -400,6 +401,25 @@
             <label class="chk"><input type="checkbox" v-model="newUser.isAdmin" /> 管理员</label>
             <button class="primary" @click="addUser">添加</button>
           </div>
+
+          <!-- 邀请码管理：注册需要有效（未使用）的邀请码 -->
+          <div class="invite-box">
+            <h4>邀请码 <span class="muted" style="font-weight:400">（注册需填写，每个码限用一次）</span></h4>
+            <button class="primary" @click="genInvite">生成新邀请码</button>
+            <table v-if="invites.length" class="user-table invite-table">
+              <thead><tr><th>邀请码</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+              <tbody>
+                <tr v-for="iv in invites" :key="iv.code">
+                  <td><code class="invite-code" @click="copyText(iv.code)" title="点击复制">{{ iv.code }}</code></td>
+                  <td><span :class="iv.used ? 'muted' : 'invite-ok'">{{ iv.used ? ('已用 · ' + iv.usedBy) : '未使用' }}</span></td>
+                  <td class="muted">{{ iv.createdAt }}</td>
+                  <td class="user-ops"><button class="danger" @click="delInvite(iv.code)">删除</button></td>
+                </tr>
+              </tbody>
+            </table>
+            <p v-else class="muted" style="font-size:13px">还没有邀请码，点上面按钮生成。</p>
+          </div>
+
           <p v-if="adminMsg" class="admin-msg">{{ adminMsg }}</p>
         </div>
       </div>

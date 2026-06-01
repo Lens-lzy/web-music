@@ -407,6 +407,59 @@ const getAllSongs = (userId) => {
   return out
 }
 
+// =====================================================================
+//  Invite codes (single-use). Registration requires a valid, unused code.
+//  invites.json: { codes: [ { code, createdBy, createdAt, used, usedBy, usedAt } ] }
+// =====================================================================
+const INVITES_FILE = path.join(DATA_DIR, 'invites.json')
+let invDb = null
+const loadInv = () => {
+  if (invDb) return invDb
+  ensureDir()
+  if (fs.existsSync(INVITES_FILE)) {
+    try { invDb = JSON.parse(fs.readFileSync(INVITES_FILE, 'utf8')) } catch (e) { invDb = null }
+  }
+  if (!invDb || !Array.isArray(invDb.codes)) invDb = { codes: [] }
+  return invDb
+}
+const saveInv = () => { ensureDir(); fs.writeFileSync(INVITES_FILE, JSON.stringify(invDb, null, 2)) }
+
+// random 6-digit numeric code, unique among all existing codes
+const genInviteCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0')
+
+const createInvite = (createdBy) => {
+  loadInv()
+  let code
+  do { code = genInviteCode() } while (invDb.codes.some(c => c.code === code))
+  const inv = { code, createdBy: createdBy || '', createdAt: nowStr(), used: false, usedBy: null, usedAt: null }
+  invDb.codes.unshift(inv)
+  saveInv()
+  return inv
+}
+const listInvites = () => { loadInv(); return invDb.codes.slice() }
+const deleteInvite = (code) => {
+  loadInv()
+  const before = invDb.codes.length
+  invDb.codes = invDb.codes.filter(c => c.code !== String(code))
+  if (invDb.codes.length === before) throw new Error('邀请码不存在')
+  saveInv()
+  return true
+}
+// throws if the code is missing or already used; returns the invite otherwise
+const validateInvite = (code) => {
+  loadInv()
+  const inv = invDb.codes.find(c => c.code === String(code || '').trim())
+  if (!inv) throw new Error('邀请码无效')
+  if (inv.used) throw new Error('邀请码已被使用')
+  return inv
+}
+const consumeInvite = (code, usedBy) => {
+  const inv = validateInvite(code)
+  inv.used = true; inv.usedBy = usedBy; inv.usedAt = nowStr()
+  saveInv()
+  return inv
+}
+
 module.exports = {
   load, listUsers, findById, findByUsername,
   createUser, deleteUser, setPassword, setAdmin,
@@ -417,5 +470,6 @@ module.exports = {
   getQueue, setQueue, deleteQueue,
   addHistory, getHistory, deleteHistory,
   getSearchHistory, addSearchHistory, removeSearchHistory, clearSearchHistory, deleteSearchHistory,
-  DATA_DIR, USERS_FILE, FAVORITES_FILE, PLAYLISTS_FILE, QUEUE_FILE, HISTORY_FILE, SEARCH_HISTORY_FILE,
+  createInvite, listInvites, deleteInvite, validateInvite, consumeInvite,
+  DATA_DIR, USERS_FILE, FAVORITES_FILE, PLAYLISTS_FILE, QUEUE_FILE, HISTORY_FILE, SEARCH_HISTORY_FILE, INVITES_FILE,
 }
