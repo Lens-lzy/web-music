@@ -1,0 +1,17 @@
+{
+  "name": "web-music",
+  "version": "0.1.0",
+  "description": "网页版音乐播放器：复用 lx-music 音乐源脚本 + musicSdk，网易云风格前端",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

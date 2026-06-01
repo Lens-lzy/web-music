@@ -1,0 +1,24 @@
+# 依赖
+node_modules/
+
+# 第三方音源脚本：不纳入版本控制（公开仓库不含这些灰色生态脚本）。
+# 首次部署/换机时用 scripts/fetch-sources.sh 从上游获取；git pull 不会动它。
+lx-music-source-main/
+
+# 自解压一键安装脚本：体积大且内嵌音源脚本，本地构建后私下分发，不入库。
+/install-web-music.sh
+
+# 运行时用户数据（含密码哈希、认证密钥，切勿提交）
+data/
+*.secret
+
+# 环境变量
+.env
+*.env
+!deploy/*.env.example
+
+# 日志与临时文件
+*.log
+npm-debug.log*
+.DS_Store
+tmp/

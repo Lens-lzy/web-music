@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Private FM · Private Echo</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app" v-cloak>
+    <!-- 轻提示 -->
+    <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
+    <!-- ============ 登录界面 ============ -->
+    <div v-if="!user" class="login-screen">
+      <div class="login-box">
+        <div class="login-logo">Private FM</div>
+        <p class="login-sub">Private Echo · 你的私人电波</p>
+        <input v-model="login.username" @keyup.enter="doLogin" placeholder="用户名" />
+        <input v-model="login.password" @keyup.enter="doLogin" type="password" placeholder="密码" />
+        <button class="login-btn" :disabled="loggingIn" @click="doLogin">{{ loggingIn ? '登录中…' : '登 录' }}</button>
+        <p v-if="login.error" class="login-err">{{ login.error }}</p>
+      </div>
+    </div>
+
+    <!-- ============ 主应用 ============ -->
+    <template v-else>
+    <header class="topbar">
+      <div class="brand"><span class="logo">Private FM</span></div>
+      <div class="search" @click.stop>
+        <div class="search-box">
+          <input v-model="keyword" @keyup.enter="doSearch()" @focus="onSearchFocus" type="text" placeholder="搜索音乐、歌手" />
+          <!-- 搜索历史下拉 -->
+          <div v-if="searchFocused && searchHistory.length" class="search-history">
+            <div class="sh-head">
+              <span>搜索历史</span>
+              <span class="sh-clear" @click="clearHistory">清空</span>
+            </div>
+            <div v-for="kw in searchHistory" :key="kw" class="sh-item" @click="pickHistory(kw)">
+              <span class="sh-kw">🕘 {{ kw }}</span>
+              <span class="sh-del" @click.stop="removeHistory(kw)" title="删除">×</span>
+            </div>
+          </div>
+        </div>
+        <button @click="doSearch()">搜索</button>
+        <select v-model="platform" class="platform-select" title="搜索平台">
+          <option v-for="p in platforms" :key="p" :value="p">{{ platformName(p) }}</option>
+        </select>
+      </div>
+      <div class="topbar-right">
+        <select v-model="sourceScript" class="source-select" title="音乐源(取播放链接)">
+          <option value="">自动选源</option>
+          <option v-for="s in sources" :key="s.id" :value="s.id" :disabled="!s.ready">
+            {{ s.name }}{{ s.ready ? '' : '(未就绪)' }}
+          </option>
+        </select>
+        <div class="user-menu">
+          <span class="user-name" @click.stop="userMenuOpen=!userMenuOpen">
+            {{ user.username }}<span v-if="user.isAdmin" class="badge-admin">管理员</span> ▾
+          </span>
+          <div v-if="userMenuOpen" class="user-dropdown" @click.stop>
+            <div class="dd-item" @click="openChangePwd">修改密码</div>
+            <div v-if="user.isAdmin" class="dd-item" @click="openAdmin">成员管理</div>
+            <div class="dd-item" @click="doLogout">退出登录</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="main">
+      <aside class="sidebar">
+        <div class="nav-group">
+          <div class="nav-title">发现</div>
+          <div class="nav-item" :class="{active: view==='featured'}" @click="view='featured'; activePlaylist=null">✨ 推荐</div>
+          <div class="nav-item" :class="{active: view==='charts'}" @click="view='charts'; activePlaylist=null">🏆 热门榜单</div>
+        </div>
+        <div class="nav-group">
+          <div class="nav-title">
+            我的歌单
+            <span class="nav-add" title="新建歌单" @click="toggleNewPl">＋</span>
+          </div>
+          <div v-if="showNewPl" class="new-pl">
+            <input ref="newPl" v-model="newPlaylistName" @keyup.enter="createPlaylist" @keyup.esc="showNewPl=false" placeholder="输入歌单名，回车新建" />
+            <button @click="createPlaylist">建</button>
+          </div>
+          <div v-for="p in playlists" :key="p.id"
+               class="nav-item playlist-item"
+               :class="{active: view==='playlist' && activePlaylist && activePlaylist.id===p.id}"
+               @click="openPlaylist(p)">
+            <span class="pl-name">{{ p.isDefault ? '❤️ ' : '🎵 ' }}{{ p.name }}</span>
+            <span class="pl-count">{{ p.count }}</span>
+            <span v-if="!p.isDefault" class="pl-del" title="删除歌单" @click.stop="deletePlaylist(p)">×</span>
+          </div>
+        </div>
+        <div class="nav-group" v-if="user.isAdmin">
+          <div class="nav-title">管理</div>
+          <div class="nav-item" @click="openAdmin">👥 成员管理</div>
+        </div>
+      </aside>
+
+      <section class="content">
+        <!-- 推荐首页 -->
+        <div v-show="view==='featured'" class="featured-view">
+          <h2 class="list-title">✨ 推荐</h2>
+
+          <!-- 个性化：随便听听 + 每日推荐 -->
+          <div class="hero-row">
+            <div class="hero-shuffle" @click="shufflePlay">
+              <div class="hero-shuffle-ic">🎲</div>
+              <div class="hero-shuffle-txt">
+                <div class="hs-title">{{ shuffling ? '正在挑歌…' : '随便听听' }}</div>
+                <div class="hs-sub">按你的口味随机 30 首</div>
+              </div>
+            </div>
+            <div class="hero-daily" @click="recommend.daily.length && playCard({title:'每日推荐', songs: recommend.daily})">
+              <div class="hero-daily-ic">📅</div>
+              <div class="hero-daily-txt">
+                <div class="hs-title">每日推荐</div>
+                <div class="hs-sub">{{ recommend.daily.length ? recommend.daily.length + ' 首 · 每天 6 点更新' : (recommendLoading ? '生成中…' : '听几首歌后自动生成') }}</div>
+              </div>
+              <button class="hero-refresh" :disabled="recommendLoading" title="换一批推荐"
+                      @click.stop="loadRecommend(true)">{{ recommendLoading ? '…' : '↻' }}</button>
+            </div>
+          </div>
+
+          <!-- 因为你喜欢 XX -->
+          <template v-if="recommend.cards && recommend.cards.length">
+            <h3 class="section-sub">为你推荐</h3>
+            <div class="card-grid">
+              <div v-for="card in recommend.cards" :key="card.key" class="chart-card">
+                <div class="card-head">
+                  <img class="card-cover" :src="cover(card.songs[0])" />
+                  <div class="card-headtxt">
+                    <div class="card-title">{{ card.title }}</div>
+                    <div class="card-desc muted">{{ card.desc }}</div>
+                  </div>
+                  <button class="card-play" @click="playCard(card)" title="播放">▶</button>
+                </div>
+                <ol class="card-songs">
+                  <li v-for="(s,i) in card.songs.slice(0,6)" :key="keyOf(s)"
+                      :class="{playing: isCurrent(s)}"
+                      @dblclick="playCardSong(card, s)" @contextmenu.prevent="openCtxMenu(s, card.songs, $event)">
+                    <img class="cs-thumb" :src="cover(s)" />
+                    <span class="cs-info"><span class="cs-name">{{ s.name }}</span><span class="cs-singer muted">{{ s.singer }}</span></span>
+                    <span class="cs-op" @click.stop="openCtxMenu(s, card.songs, $event)" title="更多">⋯</span>
+                  </li>
+                </ol>
+              </div>
+            </div>
+          </template>
+
+        </div>
+
+        <!-- 热门榜单 -->
+        <div v-show="view==='charts'" class="featured-view">
+          <h2 class="list-title">
+            🏆 热门榜单
+            <span class="muted" style="font-size:13px">{{ featuredTime() }}</span>
+            <button class="play-all" style="margin-left:auto" @click="loadFeatured" :disabled="featuredLoading">{{ featuredLoading ? '刷新中…' : '↻ 刷新' }}</button>
+          </h2>
+          <div v-if="featuredLoading && !featured.cards.length" class="hint">加载中…</div>
+          <div v-else-if="!featured.cards.length" class="hint">榜单数据加载中，稍后刷新看看～</div>
+          <div v-else class="card-grid">
+            <div v-for="card in featured.cards" :key="card.key" class="chart-card">
+              <div class="card-head">
+                <img class="card-cover" :src="cover(card.songs[0])" />
+                <div class="card-headtxt">
+                  <div class="card-title">{{ card.title }}</div>
+                  <div class="card-desc muted">{{ card.desc }}</div>
+                </div>
+                <button class="card-play" @click="playCard(card)" title="播放整个榜单">▶</button>
+              </div>
+              <ol class="card-songs">
+                <li v-for="(s,i) in card.songs.slice(0,10)" :key="keyOf(s)"
+                    :class="{playing: isCurrent(s)}"
+                    @dblclick="playCardSong(card, s)" @contextmenu.prevent="openCtxMenu(s, card.songs, $event)">
+                  <span class="cs-rank" :class="{top: i<3}">{{ i+1 }}</span>
+                  <img class="cs-thumb" :src="cover(s)" />
+                  <span class="cs-info"><span class="cs-name">{{ s.name }}</span><span class="cs-singer muted">{{ s.singer }}</span></span>
+                  <span class="cs-op" @click.stop="openCtxMenu(s, card.songs, $event)" title="更多">⋯</span>
+                </li>
+              </ol>
+            </div>
+          </div>
+        </div>
+
+        <!-- 搜索结果 -->
+        <div v-show="view==='search'" class="list-view">
+          <h2 class="list-title">
+            {{ lastKeyword ? '“'+lastKeyword+'” 的搜索结果' : '搜索音乐' }}
+            <span v-if="lastKeyword && searchTotal" class="muted" style="font-size:14px">（{{ results.length }} / {{ searchTotal }}）</span>
+          </h2>
+          <div v-if="loading" class="hint">加载中…</div>
+          <div v-else-if="results.length===0" class="hint">输入关键词开始搜索</div>
+          <template v-else>
+          <table class="song-table">
+            <thead><tr><th class="col-idx">#</th><th>歌曲</th><th>歌手</th><th>专辑</th><th class="col-dur">时长</th><th class="col-op">操作</th></tr></thead>
+            <tbody>
+              <tr v-for="(s,i) in results" :key="keyOf(s)" :class="{playing: isCurrent(s)}"
+                  @dblclick="onDblClick(s, results)" @contextmenu.prevent="openCtxMenu(s, results, $event)">
+                <td class="col-idx">{{ i+1 }}</td>
+                <td class="song-name"><img class="row-thumb" :src="cover(s)" />{{ s.name }}</td>
+                <td class="muted">{{ s.singer }}</td>
+                <td class="muted">{{ s.albumName }}</td>
+                <td class="col-dur muted">{{ s.interval || '' }}</td>
+                <td class="col-op">
+                  <span class="op" @click.stop="toggleLike(s)" :title="isLiked(s)?'取消喜欢':'喜欢'">{{ isLiked(s)?'❤️':'♡' }}</span>
+                  <span class="op" @click.stop="openAddMenu(s, $event)" title="加入歌单">＋</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="load-more-wrap">
+            <button v-if="searchHasMore" class="load-more" :disabled="loadingMore" @click="loadMore">
+              {{ loadingMore ? '加载中…' : '加载更多' }}
+            </button>
+            <span v-else class="muted" style="font-size:13px">已经到底啦</span>
+          </div>
+          </template>
+        </div>
+
+        <!-- 歌单详情 -->
+        <div v-show="view==='playlist'" class="list-view">
+          <template v-if="activePlaylist">
+            <h2 class="list-title">
+              {{ activePlaylist.isDefault ? '❤️ ' : '🎵 ' }}{{ activePlaylist.name }}
+              <span class="muted" style="font-size:14px">（{{ activePlaylist.songs.length }} 首）</span>
+              <button v-if="activePlaylist.songs.length" class="play-all" @click="replaceQueueAndPlay(activePlaylist.songs[0], activePlaylist.songs)">▶ 播放全部</button>
+            </h2>
+            <div v-if="activePlaylist.songs.length===0" class="hint">这个歌单还没有歌，去搜索里用 ＋ 添加吧</div>
+            <table v-else class="song-table">
+              <thead><tr><th class="col-idx">#</th><th>歌曲</th><th>歌手</th><th>专辑</th><th class="col-dur">时长</th><th class="col-op">操作</th></tr></thead>
+              <tbody>
+                <tr v-for="(s,i) in activePlaylist.songs" :key="keyOf(s)" :class="{playing: isCurrent(s)}"
+                    @dblclick="onDblClick(s, activePlaylist.songs)" @contextmenu.prevent="openCtxMenu(s, activePlaylist.songs, $event)">
+                  <td class="col-idx">{{ i+1 }}</td>
+                  <td class="song-name"><img class="row-thumb" :src="cover(s)" />{{ s.name }}</td>
+                  <td class="muted">{{ s.singer }}</td>
+                  <td class="muted">{{ s.albumName }}</td>
+                  <td class="col-dur muted">{{ s.interval || '' }}</td>
+                  <td class="col-op">
+                    <span class="op" @click.stop="openAddMenu(s, $event)" title="加入其他歌单">＋</span>
+                    <span class="op" @click.stop="removeFromCurrentPlaylist(s)" title="从该歌单移除">🗑</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+        </div>
+      </section>
+    </div>
+
+    <!-- 播放条 -->
+    <footer class="player">
+      <div class="p-left" :class="{clickable: current}" @click="current && (npOpen = true)">
+        <img class="p-cover" :src="current ? cover(current) : defaultCover" />
+        <div class="p-meta" v-if="current"><div class="p-name">{{ current.name }}</div><div class="p-singer muted">{{ playError || current.singer }}</div></div>
+        <div class="p-meta muted" v-else>未在播放</div>
+      </div>
+      <div class="p-center">
+        <div class="p-ctrls">
+          <button @click="prev" title="上一首">⏮</button>
+          <button class="play-btn" @click="togglePlay">{{ playing ? '⏸' : '▶' }}</button>
+          <button @click="next" title="下一首">⏭</button>
+        </div>
+        <div class="p-progress">
+          <span class="t">{{ fmt(curTime) }}</span>
+          <input type="range" min="0" :max="duration||0" step="0.1" v-model.number="seekPos" @mousedown="seeking=true" @change="seekTo" />
+          <span class="t">{{ fmt(duration) }}</span>
+        </div>
+      </div>
+      <div class="p-right">
+        <span class="vol-ic">🔊</span>
+        <input type="range" min="0" max="1" step="0.01" v-model.number="volume" @input="setVolume" class="vol" />
+        <button class="queue-btn" :class="{active: queuePanelOpen}" @click.stop="queuePanelOpen=!queuePanelOpen" title="播放列表">
+          ☰ <span class="queue-count">{{ queue.length }}</span>
+        </button>
+      </div>
+      <audio ref="audio"></audio>
+
+      <!-- 播放列表面板 -->
+      <div v-if="queuePanelOpen" class="queue-panel" @click.stop>
+        <div class="queue-head">
+          <span>播放列表（{{ queue.length }}）</span>
+          <span class="queue-clear" @click="clearQueue">清空</span>
+        </div>
+        <div class="queue-list">
+          <div v-if="queue.length===0" class="hint" style="padding:20px">列表为空</div>
+          <div v-for="(s,i) in queue" :key="keyOf(s)+i" class="queue-item" :class="{playing: i===queueIdx}" @click="playAt(i)">
+            <span class="qi-name">{{ s.name }}</span>
+            <span class="qi-singer muted">{{ s.singer }}</span>
+            <span class="qi-del" @click.stop="removeFromQueue(i)" title="移除">×</span>
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- 正在播放 / 歌词 全屏面板 -->
+    <transition name="np-slide">
+      <div v-if="npOpen && current" class="np-panel">
+        <div class="np-close" @click="npOpen=false" title="收起">⌄</div>
+        <div class="np-body">
+          <div class="np-left">
+            <img class="np-cover" :class="{spin: playing}" :src="cover(current)" />
+            <div class="np-title">{{ current.name }}</div>
+            <div class="np-singer">{{ current.singer }}</div>
+            <div class="np-album muted" v-if="current.albumName">专辑：{{ current.albumName }}</div>
+          </div>
+          <div class="np-right" ref="lyricBox">
+            <div v-if="lyricLines.length===0" class="np-nolyric">暂无歌词</div>
+            <p v-for="(l,i) in lyricLines" :key="i" :class="{cur: i===curLyricIdx}">{{ l.text }}</p>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- 加入歌单 弹出菜单 -->
+    <div v-if="addMenu.open" class="add-menu" :style="{ left: addMenu.x + 'px', top: addMenu.y + 'px' }" @click.stop>
+      <div class="add-menu-title">加入歌单</div>
+      <div v-for="p in playlists" :key="p.id" class="add-menu-item" @click="addSongToPlaylist(p.id)">
+        {{ p.isDefault ? '❤️ ' : '🎵 ' }}{{ p.name }}
+      </div>
+    </div>
+
+    <!-- 右键菜单 -->
+    <div v-if="ctxMenu.open" class="ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
+      <div class="ctx-item" @click="ctxPlay">▶ 播放</div>
+      <div class="ctx-item" @click="ctxPlayNext">⏭ 下一首播放</div>
+      <div class="ctx-item" @click="ctxLike">❤️ 加入喜欢</div>
+      <div class="ctx-item" @click="ctxAddToPlaylist($event)">＋ 收藏到歌单</div>
+    </div>
+
+    <!-- 双击替换播放列表 确认弹窗 -->
+    <div v-if="replaceDialog.open" class="modal-mask" @click.self="replaceDialog.open=false">
+      <div class="modal modal-sm">
+        <div class="modal-head"><h3>播放</h3><span class="modal-close" @click="replaceDialog.open=false">×</span></div>
+        <div class="modal-body">
+          <p style="font-size:14px;line-height:1.7">
+            《{{ replaceDialog.song && replaceDialog.song.name }}》<br>
+            是否用<b>{{ replaceDialog.label }}</b>替换当前播放列表？
+          </p>
+          <div style="display:flex;gap:10px;margin-top:6px">
+            <button class="primary" @click="dialogReplace">替换为该列表</button>
+            <button @click="dialogOnlyOne">只播这一首</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 成员管理弹窗 -->
+    <div v-if="adminOpen" class="modal-mask" @click.self="adminOpen=false">
+      <div class="modal">
+        <div class="modal-head"><h3>成员管理</h3><span class="modal-close" @click="adminOpen=false">×</span></div>
+        <div class="modal-body">
+          <table class="user-table">
+            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="u in users" :key="u.id">
+                <td>{{ u.id }}</td><td>{{ u.username }}</td>
+                <td>{{ u.isAdmin ? '管理员' : '成员' }}</td>
+                <td class="muted">{{ u.createdAt }}</td>
+                <td class="user-ops">
+                  <button @click="resetPwd(u)">重置密码</button>
+                  <button v-if="!u.isAdmin" @click="toggleAdmin(u, true)">设为管理员</button>
+                  <button v-else-if="u.id!==user.id" @click="toggleAdmin(u, false)">取消管理员</button>
+                  <button v-if="u.id!==user.id" class="danger" @click="removeUser(u)">删除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="add-user">
+            <h4>添加成员</h4>
+            <input v-model="newUser.username" placeholder="用户名" />
+            <input v-model="newUser.password" type="password" placeholder="密码(≥4位)" />
+            <label class="chk"><input type="checkbox" v-model="newUser.isAdmin" /> 管理员</label>
+            <button class="primary" @click="addUser">添加</button>
+          </div>
+          <p v-if="adminMsg" class="admin-msg">{{ adminMsg }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 修改密码弹窗 -->
+    <div v-if="pwdOpen" class="modal-mask" @click.self="pwdOpen=false">
+      <div class="modal modal-sm">
+        <div class="modal-head"><h3>修改密码</h3><span class="modal-close" @click="pwdOpen=false">×</span></div>
+        <div class="modal-body">
+          <input v-model="pwd.old" type="password" placeholder="原密码" />
+          <input v-model="pwd.new" type="password" placeholder="新密码(≥4位)" />
+          <button class="primary" @click="changePwd">确认修改</button>
+          <p v-if="pwd.msg" class="admin-msg">{{ pwd.msg }}</p>
+        </div>
+      </div>
+    </div>
+    </template>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
