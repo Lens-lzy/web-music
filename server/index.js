@@ -413,9 +413,10 @@ app.get('/api/proxy/audio', auth.requireAuth, (req, res) => {
 })
 
 // ---- static frontend ----
-app.use(express.static(PUBLIC_DIR))
-// Always serve a fresh index.html (no-cache) so updated asset references take
-// effect immediately — prevents stale cached HTML pointing at old/CDN scripts.
+// no-cache on all assets: the browser keeps an ETag and revalidates each load
+// (cheap 304s), so an updated app.js/style.css is never paired with a stale one
+// from memory cache — which would mismatch index.html and break rendering.
+app.use(express.static(PUBLIC_DIR, { setHeaders: (res) => res.set('Cache-Control', 'no-cache') }))
 app.get('*', (req, res) => {
   res.set('Cache-Control', 'no-cache')
   res.sendFile(path.join(PUBLIC_DIR, 'index.html'))
