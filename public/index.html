@@ -424,7 +424,18 @@
     </template>
   </div>
 
-  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <!-- Vue 本地内置（不依赖外部 CDN，避免 CDN 被墙/超时导致整页空白） -->
+  <script src="/vue.global.prod.js"></script>
   <script src="/app.js"></script>
+  <!-- 兜底：若 5 秒后 Vue 仍未挂载（脚本加载失败），显示提示而不是一直黑屏 -->
+  <script>
+    setTimeout(function () {
+      var app = document.getElementById('app')
+      if (app && app.hasAttribute('v-cloak')) {
+        app.removeAttribute('v-cloak')
+        app.innerHTML = '<div style="color:#aaa;text-align:center;margin-top:30vh;font-family:sans-serif">页面加载失败，请刷新重试（Ctrl/Cmd+Shift+R）。<br>若反复出现，请联系管理员。</div>'
+      }
+    }, 5000)
+  </script>
 </body>
 </html>
