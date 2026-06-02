@@ -80,7 +80,7 @@ body {
 .nav-item.active::before { content: ''; position: absolute; left: 0; width: 4px; height: 22px; background: var(--green); border-radius: 0 3px 3px 0; margin-left: -22px; }
 .nav-item { position: relative; }
 
-.content { flex: 1; overflow-y: auto; padding: 26px 30px 30px; background: linear-gradient(180deg, #2a2a2a 0%, var(--bg) 240px); border-radius: 10px; }
+.content { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 26px 30px 30px; background: linear-gradient(180deg, #2a2a2a 0%, var(--bg) 240px); border-radius: 10px; }
 .list-title { font-size: 26px; font-weight: 800; margin-bottom: 20px; letter-spacing: -.5px; }
 .hint { color: var(--muted); padding: 40px 0; text-align: center; }
 
@@ -367,7 +367,7 @@ button.primary:hover { background: var(--green-bright) !important; }
 .np-title { font-size: 26px; font-weight: 800; margin-top: 28px; }
 .np-singer { font-size: 15px; color: var(--muted); margin-top: 10px; }
 .np-album { font-size: 13px; margin-top: 6px; color: var(--muted-2) !important; }
-.np-right { width: 480px; max-width: 45vw; height: 100%; overflow-y: auto; text-align: center; line-height: 2.7; padding: 30vh 0; mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); }
+.np-right { width: 480px; max-width: 45vw; height: 100%; overflow-y: auto; overflow-x: hidden; text-align: center; line-height: 2.7; padding: 30vh 0; mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); -webkit-mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent); }
 .np-right p { color: rgba(255,255,255,.45); font-size: 16px; transition: all .25s; }
 .np-right p.cur { color: var(--green-bright); font-size: 19px; font-weight: 700; }
 .np-nolyric { color: var(--muted); margin-top: 30vh; }
