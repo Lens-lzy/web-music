@@ -44,6 +44,7 @@
     <!-- ============ 主应用 ============ -->
     <template v-else>
     <header class="topbar">
+      <button class="nav-toggle" @click.stop="navOpen=true" aria-label="菜单">☰</button>
       <div class="brand"><span class="logo">Private FM</span></div>
       <div class="search" @click.stop>
         <div class="search-box">
@@ -86,11 +87,12 @@
     </header>
 
     <div class="main">
-      <aside class="sidebar">
+      <div v-if="navOpen" class="nav-backdrop" @click="navOpen=false"></div>
+      <aside class="sidebar" :class="{open: navOpen}">
         <div class="nav-group">
           <div class="nav-title">发现</div>
-          <div class="nav-item" :class="{active: view==='featured'}" @click="view='featured'; activePlaylist=null">✨ 推荐</div>
-          <div class="nav-item" :class="{active: view==='charts'}" @click="view='charts'; activePlaylist=null">🏆 热门榜单</div>
+          <div class="nav-item" :class="{active: view==='featured'}" @click="view='featured'; activePlaylist=null; navOpen=false">✨ 推荐</div>
+          <div class="nav-item" :class="{active: view==='charts'}" @click="view='charts'; activePlaylist=null; navOpen=false">🏆 热门榜单</div>
         </div>
         <div class="nav-group">
           <div class="nav-title">

@@ -58,6 +58,7 @@ _app = createApp({
       reg: { username: '', password: '', password2: '', inviteCode: '', error: '' },
       loggingIn: false,
       userMenuOpen: false,
+      navOpen: false,                    // 移动端侧栏抽屉
       // admin
       adminOpen: false, users: [], adminMsg: '',
       newUser: { username: '', password: '', isAdmin: false },
@@ -181,7 +182,7 @@ _app = createApp({
     },
     // ---- admin ----
     async openAdmin() {
-      this.userMenuOpen = false; this.adminMsg = ''
+      this.userMenuOpen = false; this.navOpen = false; this.adminMsg = ''
       try {
         this.users = (await api.get('/api/admin/users')).users
         await this.loadInvites()
@@ -250,7 +251,7 @@ _app = createApp({
       try { const p = (await api.get('/api/playlists/' + d.id)).playlist; this.likedKeys = p.songs.map(s => this.keyOf(s)) } catch (e) {}
     },
     async openPlaylist(p) {
-      this.view = 'playlist'
+      this.view = 'playlist'; this.navOpen = false
       try {
         this.activePlaylist = (await api.get('/api/playlists/' + p.id)).playlist
         this.fetchCovers(this.activePlaylist.songs)
