@@ -180,6 +180,10 @@ app.delete('/api/admin/users/:id', auth.requireAdmin, wrap(async (req, res) => {
 // force the user to change it on next login, and return it so the admin can
 // pass it on. With { newPassword } -> set that specific password.
 app.post('/api/admin/users/:id/password', auth.requireAdmin, wrap(async (req, res) => {
+  const target = store.findById(Number(req.params.id))
+  if (target && target.isSuper && req.user.id !== target.id) {
+    return res.status(403).json({ error: '不能修改超级管理员的密码' })
+  }
   const { newPassword } = req.body || {}
   if (newPassword) {
     store.setPassword(Number(req.params.id), newPassword)
@@ -196,7 +200,8 @@ app.post('/api/admin/users/:id/admin', auth.requireAdmin, wrap(async (req, res) 
 // ---- admin: invite codes (single-use, required for registration) ----
 app.get('/api/admin/invites', auth.requireAdmin, (req, res) => res.json({ invites: store.listInvites() }))
 app.post('/api/admin/invites', auth.requireAdmin, wrap(async (req, res) => {
-  res.json({ invite: store.createInvite(req.user.username) })
+  const { maxUses } = req.body || {}
+  res.json({ invite: store.createInvite(req.user.username, maxUses) })
 }))
 app.delete('/api/admin/invites/:code', auth.requireAdmin, wrap(async (req, res) => {
   store.deleteInvite(req.params.code)

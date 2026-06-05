@@ -53,12 +53,20 @@ const load = () => {
       username: INITIAL_ADMIN_USER,
       passwordHash: hashPassword(INITIAL_ADMIN_PASSWORD),
       isAdmin: true,
+      isSuper: true, // 超级管理员（站主）：不可被取消管理员、不可被删除
       mustChangePassword: true,
       createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '),
     })
     save()
     const source = process.env.WEB_MUSIC_ADMIN_PASSWORD ? 'WEB_MUSIC_ADMIN_PASSWORD' : 'development default password'
     console.log(`[store] seeded default super-admin: ${INITIAL_ADMIN_USER} (${source}; please change it)`)
+  }
+  // 迁移：老数据没有 isSuper，把最早创建的管理员（id 最小，即站主）标记为超级管理员
+  if (db.users.length && !db.users.some(u => u.isSuper)) {
+    const pool = db.users.filter(u => u.isAdmin)
+    const owner = (pool.length ? pool : db.users).reduce((a, b) => (a.id <= b.id ? a : b))
+    owner.isSuper = true
+    save()
   }
   return db
 }
@@ -70,7 +78,7 @@ const save = () => {
 
 // ---- public shape (never leak passwordHash) ----
 const publicUser = (u) => u && ({
-  id: u.id, username: u.username, isAdmin: !!u.isAdmin,
+  id: u.id, username: u.username, isAdmin: !!u.isAdmin, isSuper: !!u.isSuper,
   mustChangePassword: !!u.mustChangePassword, createdAt: u.createdAt,
 })
 
@@ -102,6 +110,7 @@ const deleteUser = (id) => {
   id = Number(id)
   const u = findById(id)
   if (!u) throw new Error('用户不存在')
+  if (u.isSuper) throw new Error('不能删除超级管理员')
   if (u.isAdmin && db.users.filter(x => x.isAdmin).length <= 1) {
     throw new Error('不能删除最后一个管理员')
   }
@@ -151,6 +160,7 @@ const setAdmin = (id, isAdmin) => {
   load()
   const u = findById(id)
   if (!u) throw new Error('用户不存在')
+  if (u.isSuper && !isAdmin) throw new Error('不能取消超级管理员的权限')
   if (u.isAdmin && !isAdmin && db.users.filter(x => x.isAdmin).length <= 1) {
     throw new Error('不能取消最后一个管理员的权限')
   }
@@ -408,8 +418,9 @@ const getAllSongs = (userId) => {
 }
 
 // =====================================================================
-//  Invite codes (single-use). Registration requires a valid, unused code.
-//  invites.json: { codes: [ { code, createdBy, createdAt, used, usedBy, usedAt } ] }
+//  Invite codes (multi-use). Registration requires a code with remaining uses.
+//  invites.json: { codes: [ { code, createdBy, createdAt, maxUses, uses: [{username, at}] } ] }
+//  老格式 { used, usedBy, usedAt } 会在加载时自动迁移成上面的形态。
 // =====================================================================
 const INVITES_FILE = path.join(DATA_DIR, 'invites.json')
 let invDb = null
@@ -420,6 +431,16 @@ const loadInv = () => {
     try { invDb = JSON.parse(fs.readFileSync(INVITES_FILE, 'utf8')) } catch (e) { invDb = null }
   }
   if (!invDb || !Array.isArray(invDb.codes)) invDb = { codes: [] }
+  // 迁移老的单次邀请码 -> 多次使用结构
+  let changed = false
+  for (const c of invDb.codes) {
+    if (!Array.isArray(c.uses)) {
+      c.uses = (c.used && c.usedBy) ? [{ username: c.usedBy, at: c.usedAt || c.createdAt || nowStr() }] : []
+      changed = true
+    }
+    if (typeof c.maxUses !== 'number' || c.maxUses < 1) { c.maxUses = 1; changed = true }
+  }
+  if (changed) saveInv()
   return invDb
 }
 const saveInv = () => { ensureDir(); fs.writeFileSync(INVITES_FILE, JSON.stringify(invDb, null, 2)) }
@@ -427,16 +448,37 @@ const saveInv = () => { ensureDir(); fs.writeFileSync(INVITES_FILE, JSON.stringi
 // random 6-digit numeric code, unique among all existing codes
 const genInviteCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0')
 
-const createInvite = (createdBy) => {
+// 对外形态：算出已用次数/剩余次数/是否用完，并保留旧网页客户端读取的 used/usedBy 字段
+const publicInvite = (inv) => {
+  const uses = Array.isArray(inv.uses) ? inv.uses : []
+  const maxUses = inv.maxUses || 1
+  const useCount = uses.length
+  const remaining = Math.max(0, maxUses - useCount)
+  return {
+    code: inv.code,
+    createdBy: inv.createdBy || '',
+    createdAt: inv.createdAt || '',
+    maxUses, useCount, remaining,
+    used: remaining <= 0,
+    uses: uses.map(x => ({ username: x.username, at: x.at })),
+    usedBy: useCount ? uses.map(x => x.username).join('、') : null, // 兼容旧网页客户端
+    usedAt: useCount ? uses[useCount - 1].at : null,                 // 兼容旧网页客户端
+  }
+}
+
+const createInvite = (createdBy, maxUses = 1) => {
   loadInv()
+  let n = parseInt(maxUses, 10)
+  if (!Number.isFinite(n) || n < 1) n = 1
+  if (n > 999) n = 999
   let code
   do { code = genInviteCode() } while (invDb.codes.some(c => c.code === code))
-  const inv = { code, createdBy: createdBy || '', createdAt: nowStr(), used: false, usedBy: null, usedAt: null }
+  const inv = { code, createdBy: createdBy || '', createdAt: nowStr(), maxUses: n, uses: [] }
   invDb.codes.unshift(inv)
   saveInv()
-  return inv
+  return publicInvite(inv)
 }
-const listInvites = () => { loadInv(); return invDb.codes.slice() }
+const listInvites = () => { loadInv(); return invDb.codes.map(publicInvite) }
 const deleteInvite = (code) => {
   loadInv()
   const before = invDb.codes.length
@@ -445,19 +487,21 @@ const deleteInvite = (code) => {
   saveInv()
   return true
 }
-// throws if the code is missing or already used; returns the invite otherwise
+// throws if the code is missing or已用完; returns the raw invite otherwise
 const validateInvite = (code) => {
   loadInv()
   const inv = invDb.codes.find(c => c.code === String(code || '').trim())
   if (!inv) throw new Error('邀请码无效')
-  if (inv.used) throw new Error('邀请码已被使用')
+  const useCount = Array.isArray(inv.uses) ? inv.uses.length : 0
+  if (useCount >= (inv.maxUses || 1)) throw new Error('邀请码已用完')
   return inv
 }
 const consumeInvite = (code, usedBy) => {
   const inv = validateInvite(code)
-  inv.used = true; inv.usedBy = usedBy; inv.usedAt = nowStr()
+  if (!Array.isArray(inv.uses)) inv.uses = []
+  inv.uses.push({ username: usedBy, at: nowStr() })
   saveInv()
-  return inv
+  return publicInvite(inv)
 }
 
 module.exports = {
