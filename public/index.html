@@ -78,6 +78,7 @@
             {{ user.username }}<span v-if="user.isAdmin" class="badge-admin">管理员</span> ▾
           </span>
           <div v-if="userMenuOpen" class="user-dropdown" @click.stop>
+            <div class="dd-item" @click="openChangeName">修改用户名</div>
             <div class="dd-item" @click="openChangePwd">修改密码</div>
             <div v-if="user.isAdmin" class="dd-item" @click="openAdmin">成员管理</div>
             <div class="dd-item" @click="doLogout">退出登录</div>
@@ -453,6 +454,21 @@
           <input v-model="pwd.new" type="password" placeholder="新密码(≥4位)" />
           <button class="primary" @click="changePwd">确认修改</button>
           <p v-if="pwd.msg && !pwd.force" class="admin-msg">{{ pwd.msg }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 修改用户名弹窗 -->
+    <div v-if="nameOpen" class="modal-mask" @click.self="nameOpen=false">
+      <div class="modal modal-sm">
+        <div class="modal-head">
+          <h3>修改用户名</h3>
+          <span class="modal-close" @click="nameOpen=false">×</span>
+        </div>
+        <div class="modal-body">
+          <input v-model="nameEdit.value" placeholder="新用户名" @keyup.enter="changeName" />
+          <button class="primary" @click="changeName">确认修改</button>
+          <p v-if="nameEdit.msg" class="admin-msg">{{ nameEdit.msg }}</p>
         </div>
       </div>
     </div>

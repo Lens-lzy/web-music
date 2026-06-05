@@ -134,6 +134,21 @@ const setPassword = (id, newPassword) => {
   return true
 }
 
+// 用户自助改名（任何账号都能改自己的用户名）。校验非空、长度、唯一（不区分大小写）。
+const setUsername = (id, username) => {
+  load()
+  const u = findById(id)
+  if (!u) throw new Error('用户不存在')
+  username = String(username || '').trim()
+  if (!username) throw new Error('用户名不能为空')
+  if (username.length > 40) throw new Error('用户名过长')
+  const existing = findByUsername(username)
+  if (existing && existing.id !== u.id) throw new Error('用户名已存在')
+  u.username = username
+  save()
+  return publicUser(u)
+}
+
 // Generate a random, human-friendly password (no ambiguous chars like 0/O/1/l).
 const generatePassword = (len = 10) => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
@@ -506,7 +521,7 @@ const consumeInvite = (code, usedBy) => {
 
 module.exports = {
   load, listUsers, findById, findByUsername,
-  createUser, deleteUser, setPassword, setAdmin,
+  createUser, deleteUser, setPassword, setUsername, setAdmin,
   generatePassword, adminResetPassword,
   authenticate, publicUser, verifyPassword, hashPassword,
   getPlaylists, getPlaylist, createPlaylist, deletePlaylist, renamePlaylist,

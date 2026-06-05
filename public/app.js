@@ -66,6 +66,7 @@ _app = createApp({
       inviteMax: 1,                      // 生成邀请码时的可用次数
       lastReset: null,                   // {username, password} 最近一次重置出的临时密码
       pwdOpen: false, pwd: { old: '', new: '', msg: '', force: false },
+      nameOpen: false, nameEdit: { value: '', msg: '' },
       // playlists
       playlists: [],              // [{id,name,isDefault,count,createdAt}]
       activePlaylist: null,       // {id,name,isDefault,songs:[...]} when viewing one
@@ -229,6 +230,19 @@ _app = createApp({
     },
     async toggleAdmin(u, val) {
       try { await api.post('/api/admin/users/' + u.id + '/admin', { isAdmin: val }); this.users = (await api.get('/api/admin/users')).users } catch (e) { this.adminMsg = e.message }
+    },
+    openChangeName() { this.userMenuOpen = false; this.nameEdit = { value: (this.user && this.user.username) || '', msg: '' }; this.nameOpen = true },
+    async changeName() {
+      this.nameEdit.msg = ''
+      const v = String(this.nameEdit.value || '').trim()
+      if (!v) { this.nameEdit.msg = '用户名不能为空'; return }
+      if (this.user && v === this.user.username) { this.nameOpen = false; return }
+      try {
+        const r = await api.post('/api/me/username', { username: v })
+        if (this.user && r.user) this.user.username = r.user.username
+        this.nameEdit.msg = '修改成功'
+        setTimeout(() => { this.nameOpen = false }, 800)
+      } catch (e) { this.nameEdit.msg = e.message }
     },
     openChangePwd() { this.userMenuOpen = false; this.pwd = { old: '', new: '', msg: '', force: false }; this.pwdOpen = true },
     async changePwd() {

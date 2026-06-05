@@ -122,6 +122,12 @@ app.post('/api/me/password', auth.requireAuth, wrap(async (req, res) => {
   res.json({ ok: true })
 }))
 
+// change own username (任何账号都能改自己的用户名)
+app.post('/api/me/username', auth.requireAuth, wrap(async (req, res) => {
+  const u = store.setUsername(req.user.id, (req.body || {}).username)
+  res.json({ user: u })
+}))
+
 // ---- per-user playlists (my-liked is the default, non-deletable one) ----
 // All scoped to the logged-in user, so accounts never share data.
 app.get('/api/playlists', auth.requireAuth, (req, res) => {
