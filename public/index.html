@@ -384,14 +384,20 @@
             <tbody>
               <tr v-for="u in users" :key="u.id">
                 <td>{{ u.id }}</td><td>{{ u.username }}</td>
-                <td>{{ u.isAdmin ? '管理员' : '成员' }}</td>
+                <td>
+                  <span v-if="u.isSuper" class="badge-admin">超级管理员</span>
+                  <template v-else>{{ u.isAdmin ? '管理员' : '成员' }}</template>
+                </td>
                 <td class="muted">{{ u.mustChangePassword ? '待改密' : '正常' }}</td>
                 <td class="muted">{{ u.createdAt }}</td>
                 <td class="user-ops">
-                  <button @click="resetPwd(u)">重置密码</button>
-                  <button v-if="!u.isAdmin" @click="toggleAdmin(u, true)">设为管理员</button>
-                  <button v-else-if="u.id!==user.id" @click="toggleAdmin(u, false)">取消管理员</button>
-                  <button v-if="u.id!==user.id" class="danger" @click="removeUser(u)">删除</button>
+                  <span v-if="u.isSuper" class="muted">站主 · 不可变更</span>
+                  <template v-else>
+                    <button @click="resetPwd(u)">重置密码</button>
+                    <button v-if="!u.isAdmin" @click="toggleAdmin(u, true)">设为管理员</button>
+                    <button v-else-if="u.id!==user.id" @click="toggleAdmin(u, false)">取消管理员</button>
+                    <button v-if="u.id!==user.id" class="danger" @click="removeUser(u)">删除</button>
+                  </template>
                 </td>
               </tr>
             </tbody>
@@ -404,16 +410,23 @@
             <button class="primary" @click="addUser">添加</button>
           </div>
 
-          <!-- 邀请码管理：注册需要有效（未使用）的邀请码 -->
+          <!-- 邀请码管理：注册需要有剩余次数的邀请码 -->
           <div class="invite-box">
-            <h4>邀请码 <span class="muted" style="font-weight:400">（注册需填写，每个码限用一次）</span></h4>
-            <button class="primary" @click="genInvite">生成新邀请码</button>
+            <h4>邀请码 <span class="muted" style="font-weight:400">（注册需填写，可设置可用次数）</span></h4>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+              <label class="muted" style="display:flex;align-items:center;gap:8px;font-size:13px">可用次数
+                <input type="number" min="1" max="999" v-model.number="inviteMax" style="width:72px" />
+              </label>
+              <button class="primary" @click="genInvite">生成新邀请码</button>
+            </div>
             <table v-if="invites.length" class="user-table invite-table">
-              <thead><tr><th>邀请码</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+              <thead><tr><th>邀请码</th><th>生成人</th><th>使用情况</th><th>使用者</th><th>创建时间</th><th>操作</th></tr></thead>
               <tbody>
                 <tr v-for="iv in invites" :key="iv.code">
                   <td><code class="invite-code" @click="copyText(iv.code)" title="点击复制">{{ iv.code }}</code></td>
-                  <td><span :class="iv.used ? 'muted' : 'invite-ok'">{{ iv.used ? ('已用 · ' + iv.usedBy) : '未使用' }}</span></td>
+                  <td class="muted">{{ iv.createdBy || '-' }}</td>
+                  <td><span :class="iv.used ? 'muted' : 'invite-ok'">{{ (iv.useCount || 0) }}/{{ (iv.maxUses || 1) }}<template v-if="iv.used"> · 已用完</template></span></td>
+                  <td class="muted">{{ iv.uses && iv.uses.length ? iv.uses.map(x => x.username).join('、') : '-' }}</td>
                   <td class="muted">{{ iv.createdAt }}</td>
                   <td class="user-ops"><button class="danger" @click="delInvite(iv.code)">删除</button></td>
                 </tr>

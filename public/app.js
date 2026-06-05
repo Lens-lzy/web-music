@@ -63,6 +63,7 @@ _app = createApp({
       adminOpen: false, users: [], adminMsg: '',
       newUser: { username: '', password: '', isAdmin: false },
       invites: [],                       // 邀请码列表
+      inviteMax: 1,                      // 生成邀请码时的可用次数
       lastReset: null,                   // {username, password} 最近一次重置出的临时密码
       pwdOpen: false, pwd: { old: '', new: '', msg: '', force: false },
       // playlists
@@ -194,7 +195,8 @@ _app = createApp({
     },
     async genInvite() {
       this.adminMsg = ''
-      try { await api.post('/api/admin/invites', {}); await this.loadInvites() } catch (e) { this.adminMsg = e.message }
+      const maxUses = Math.max(1, Math.min(999, parseInt(this.inviteMax, 10) || 1))
+      try { await api.post('/api/admin/invites', { maxUses }); await this.loadInvites() } catch (e) { this.adminMsg = e.message }
     },
     async delInvite(code) {
       try { await api.del('/api/admin/invites/' + encodeURIComponent(code)); await this.loadInvites() } catch (e) { this.adminMsg = e.message }
