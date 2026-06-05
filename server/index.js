@@ -417,6 +417,87 @@ app.get('/api/proxy/audio', auth.requireAuth, (req, res) => {
   stream(target, 5)
 })
 
+// ---- app 更新代理（让客户端经本服务器/Cloudflare 拿 GitHub Release，绕开被墙的下载 CDN）----
+// 服务器能连 GitHub、客户端常常连不上 *.githubusercontent.com，故由服务器中转。公开（不需登录）。
+const UPDATE_REPO = process.env.PF_UPDATE_REPO || 'Lens-lzy/private-fm-desktop'
+const GH_API = (process.env.PF_GH_API || 'https://api.github.com').replace(/\/+$/, '') // 可指向镜像/测试
+
+// GET 一个 URL 的 JSON（跟随重定向、带超时）
+const httpGetJson = (urlStr, headers, redirectsLeft = 3) => new Promise((resolve, reject) => {
+  let urlObj
+  try { urlObj = new URL(urlStr) } catch (e) { return reject(e) }
+  const lib = urlObj.protocol === 'https:' ? https : http
+  const r = lib.request(urlObj, { headers, method: 'GET' }, (up) => {
+    if ([301, 302, 307, 308].includes(up.statusCode) && up.headers.location && redirectsLeft > 0) {
+      up.resume()
+      return resolve(httpGetJson(new URL(up.headers.location, urlObj).toString(), headers, redirectsLeft - 1))
+    }
+    let body = ''
+    up.setEncoding('utf8')
+    up.on('data', (d) => { body += d })
+    up.on('end', () => {
+      if (up.statusCode >= 400) return reject(new Error('GitHub HTTP ' + up.statusCode))
+      try { resolve(JSON.parse(body)) } catch (e) { reject(e) }
+    })
+  })
+  r.on('error', reject)
+  r.setTimeout(15000, () => r.destroy(new Error('timeout')))
+  r.end()
+})
+
+const GH_HEADERS = { 'User-Agent': 'PrivateFM-Updater', Accept: 'application/vnd.github+json' }
+
+// 流式把上游（GitHub 资产）转发给客户端，跟随 302 到 githubusercontent，转发 Range
+const streamAsset = (urlStr, redirectsLeft, req, res) => {
+  let urlObj
+  try { urlObj = new URL(urlStr) } catch (e) { if (!res.headersSent) res.status(400).end(); return }
+  const lib = urlObj.protocol === 'https:' ? https : http
+  const headers = { 'User-Agent': 'PrivateFM-Updater' }
+  if (req.headers.range) headers.Range = req.headers.range
+  const up = lib.request(urlObj, { headers, method: 'GET' }, (r) => {
+    if ([301, 302, 303, 307, 308].includes(r.statusCode) && r.headers.location) {
+      r.resume()
+      if (redirectsLeft <= 0) { if (!res.headersSent) res.status(502).end(); return }
+      return streamAsset(new URL(r.headers.location, urlObj).toString(), redirectsLeft - 1, req, res)
+    }
+    res.status(r.statusCode)
+    for (const h of ['content-type', 'content-length', 'accept-ranges', 'content-range', 'last-modified', 'etag']) {
+      if (r.headers[h]) res.setHeader(h, r.headers[h])
+    }
+    if (!r.headers['content-type']) res.setHeader('content-type', 'application/octet-stream')
+    res.setHeader('cache-control', 'public, max-age=86400') // 资产名含版本号→可长缓存（利于 Cloudflare 边缘缓存）
+    r.pipe(res)
+  })
+  up.on('error', () => { if (!res.headersSent) res.status(502).end() })
+  req.on('close', () => up.destroy())
+  up.setTimeout(30000, () => up.destroy())
+  up.end()
+}
+
+// 最新版本信息：服务器侧拉 GitHub，再把每个资产地址改写成「本服务器代理地址」
+app.get('/api/update/latest', wrap(async (req, res) => {
+  const data = await httpGetJson(`${GH_API}/repos/${UPDATE_REPO}/releases/latest`, GH_HEADERS)
+  const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim()
+  const base = proto + '://' + req.get('host')
+  const assets = Array.isArray(data.assets) ? data.assets.map((a) => ({
+    name: a.name,
+    browser_download_url: base + '/api/update/asset/' + encodeURIComponent(a.name)
+  })) : []
+  res.set('Cache-Control', 'no-cache')
+  res.json({ tag_name: data.tag_name, body: data.body || '', assets })
+}))
+
+// 按名字流式转发某个资产（仅限最新 release 里的资产，非开放代理）
+app.get('/api/update/asset/:name', (req, res) => {
+  httpGetJson(`${GH_API}/repos/${UPDATE_REPO}/releases/latest`, GH_HEADERS)
+    .then((data) => {
+      const asset = (data.assets || []).find((a) => a.name === req.params.name)
+      if (!asset) return res.status(404).send('asset not found')
+      streamAsset(asset.browser_download_url, 5, req, res)
+    })
+    .catch(() => { if (!res.headersSent) res.status(502).send('upstream error') })
+})
+
 // ---- static frontend ----
 // no-cache on all assets: the browser keeps an ETag and revalidates each load
 // (cheap 304s), so an updated app.js/style.css is never paired with a stale one
