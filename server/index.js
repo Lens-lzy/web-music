@@ -9,6 +9,7 @@
 //   - static       : serves ../public (the NetEase-style frontend)
 
 const path = require('node:path')
+const fs = require('node:fs')
 const http = require('node:http')
 const https = require('node:https')
 const { URL } = require('node:url')
@@ -480,25 +481,84 @@ const streamAsset = (urlStr, redirectsLeft, req, res) => {
   up.end()
 }
 
+// ---- 资产磁盘缓存（让「服务器↔GitHub」那段慢只发生一次，之后从本地盘秒发，配合 Cloudflare 边缘缓存）----
+const UPDATE_CACHE_DIR = process.env.PF_UPDATE_CACHE || path.join(store.DATA_DIR, 'update-cache')
+const warming = new Set() // 正在后台下载的资产名，避免重复下
+
+// 完整下载某个 URL 到本地文件（跟随 302，先写 .part 再原子改名，避免半成品被当成缓存）
+const downloadToFile = (urlStr, dest, redirectsLeft = 5) => new Promise((resolve, reject) => {
+  let urlObj
+  try { urlObj = new URL(urlStr) } catch (e) { return reject(e) }
+  const lib = urlObj.protocol === 'https:' ? https : http
+  const r = lib.request(urlObj, { headers: { 'User-Agent': 'PrivateFM-Updater' }, method: 'GET' }, (up) => {
+    if ([301, 302, 303, 307, 308].includes(up.statusCode) && up.headers.location) {
+      up.resume()
+      if (redirectsLeft <= 0) return reject(new Error('too many redirects'))
+      return resolve(downloadToFile(new URL(up.headers.location, urlObj).toString(), dest, redirectsLeft - 1))
+    }
+    if (up.statusCode !== 200) { up.resume(); return reject(new Error('HTTP ' + up.statusCode)) }
+    const tmp = dest + '.part'
+    const ws = fs.createWriteStream(tmp)
+    up.pipe(ws)
+    ws.on('finish', () => fs.rename(tmp, dest, (e) => (e ? reject(e) : resolve())))
+    ws.on('error', reject)
+    up.on('error', reject)
+  })
+  r.on('error', reject)
+  r.end()
+})
+
+// 后台预热：把某资产下到缓存盘（已存在或正在下则跳过）
+const ensureCached = (name, url) => {
+  const file = path.join(UPDATE_CACHE_DIR, name)
+  if (fs.existsSync(file) || warming.has(name)) return
+  warming.add(name)
+  try { fs.mkdirSync(UPDATE_CACHE_DIR, { recursive: true }) } catch (e) { /* ignore */ }
+  downloadToFile(url, file)
+    .catch((e) => console.warn('[update] 预热失败', name, e.message))
+    .finally(() => warming.delete(name))
+}
+
+// 清掉缓存盘里不属于当前 release 的旧版本文件（释放空间）
+const pruneCache = (keepNames) => {
+  let files
+  try { files = fs.readdirSync(UPDATE_CACHE_DIR) } catch (e) { return }
+  for (const f of files) {
+    if (f.endsWith('.part') || keepNames.includes(f) || warming.has(f)) continue
+    try { fs.unlinkSync(path.join(UPDATE_CACHE_DIR, f)) } catch (e) { /* ignore */ }
+  }
+}
+
 // 最新版本信息：服务器侧拉 GitHub，再把每个资产地址改写成「本服务器代理地址」
 app.get('/api/update/latest', wrap(async (req, res) => {
   const data = await httpGetJson(`${GH_API}/repos/${UPDATE_REPO}/releases/latest`, GH_HEADERS)
   const proto = String(req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim()
   const base = proto + '://' + req.get('host')
-  const assets = Array.isArray(data.assets) ? data.assets.map((a) => ({
+  const rawAssets = Array.isArray(data.assets) ? data.assets : []
+  // 后台预热到本地盘 + 清理旧版本（不阻塞本次响应）
+  rawAssets.forEach((a) => ensureCached(a.name, a.browser_download_url))
+  pruneCache(rawAssets.map((a) => a.name))
+  const assets = rawAssets.map((a) => ({
     name: a.name,
     browser_download_url: base + '/api/update/asset/' + encodeURIComponent(a.name)
-  })) : []
+  }))
   res.set('Cache-Control', 'no-cache')
   res.json({ tag_name: data.tag_name, body: data.body || '', assets })
 }))
 
-// 按名字流式转发某个资产（仅限最新 release 里的资产，非开放代理）
+// 取某个资产：缓存盘里有就直接秒发（支持 Range/断点续传），否则实时从 GitHub 转发
 app.get('/api/update/asset/:name', (req, res) => {
+  const name = path.basename(String(req.params.name)) // 防目录穿越
+  const cached = path.join(UPDATE_CACHE_DIR, name)
+  if (fs.existsSync(cached)) {
+    res.set('Cache-Control', 'public, max-age=86400')
+    return res.sendFile(cached) // express 自动处理 Range/Content-Length/ETag
+  }
   httpGetJson(`${GH_API}/repos/${UPDATE_REPO}/releases/latest`, GH_HEADERS)
     .then((data) => {
-      const asset = (data.assets || []).find((a) => a.name === req.params.name)
+      const asset = (data.assets || []).find((a) => a.name === name)
       if (!asset) return res.status(404).send('asset not found')
+      ensureCached(asset.name, asset.browser_download_url) // 顺便后台缓存，下次走磁盘
       streamAsset(asset.browser_download_url, 5, req, res)
     })
     .catch(() => { if (!res.headersSent) res.status(502).send('upstream error') })
