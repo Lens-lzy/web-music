@@ -13,11 +13,11 @@ const kg = require('../musicSdk/kg')
 const DATA_DIR = process.env.WEB_MUSIC_DATA_DIR || path.resolve(__dirname, '..', '..', 'data')
 const CACHE_FILE = path.join(DATA_DIR, 'charts.json')
 const REFRESH_MS = Number(process.env.CHARTS_REFRESH_MS) || 12 * 3600 * 1000 // 12h
-const SONGS_PER_CARD = Number(process.env.CHARTS_CARD_SIZE) || 20
+const SONGS_PER_CARD = Number(process.env.CHARTS_CARD_SIZE) || 50
 
 // 卡片定义：标题 + 酷狗榜单 id（bangid）
 const CARDS = [
-  { key: 'hot_cn',  title: '最热华语', source: 'kg', bangid: '8888',  desc: '酷狗 TOP500' },
+  { key: 'hot_cn',  title: '最热华语', source: 'kg', bangid: '8888',  desc: '酷狗 TOP50' },
   { key: 'rising',  title: '飙升榜',   source: 'kg', bangid: '6666',  desc: '近期上升最快' },
   { key: 'hot_en',  title: '最热欧美', source: 'kg', bangid: '31310', desc: '欧美热歌' },
   { key: 'new',     title: '最新发布', source: 'kg', bangid: '31308', desc: '华语新歌榜' },
@@ -79,11 +79,12 @@ const refresh = async () => {
 // public: current cards (may be empty before first successful fetch)
 const get = () => ({ updatedAt: cache.updatedAt, cards: cache.cards })
 
-// kick off: load disk cache, refresh now if stale, then schedule every REFRESH_MS
+// kick off: load disk cache (shown immediately), ALWAYS refresh in background on boot,
+// then schedule every REFRESH_MS. 后台刷新保证改了 SONGS_PER_CARD / 卡片定义后，
+// 重启即生效，无需手动删 data/charts.json（旧缓存只在刷新完成前临时顶上）。
 const start = () => {
   loadCache()
-  const stale = !cache.updatedAt || (Date.now() - cache.updatedAt) > REFRESH_MS
-  if (stale) refresh() // fire and forget; first request may see cached/empty until done
+  refresh() // fire-and-forget; serves old cache until the fresh fetch lands
   setInterval(refresh, REFRESH_MS)
 }
 
