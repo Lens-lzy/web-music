@@ -61,6 +61,13 @@ const isPlayableAudio = (urlStr, redirectsLeft = 5) => new Promise((resolve) => 
       return resolve(isPlayableAudio(new URL(r.headers.location, urlObj).toString(), redirectsLeft - 1))
     }
     const ct = (r.headers['content-type'] || '').toLowerCase()
+    // 解析音频总大小：优先 Content-Range（206 带 /total），否则 Content-Length（200 全量）。
+    // 用于剔除「试听片段」——酷我等对版权歌的免费链接常是 ~9 秒 / ~150KB 的提示音。
+    let total = null
+    const cr = r.headers['content-range']
+    if (cr && cr.includes('/')) { const t = parseInt(cr.split('/')[1], 10); if (!Number.isNaN(t)) total = t }
+    else if (r.statusCode === 200 && r.headers['content-length']) { const t = parseInt(r.headers['content-length'], 10); if (!Number.isNaN(t)) total = t }
+    const MIN_AUDIO_BYTES = 300 * 1024   // ~18s @128k；低于此判定为试听片段
     const chunks = []
     r.on('data', c => { chunks.push(c); if (Buffer.concat(chunks).length >= 1024) req.destroy() })
     const finish = () => {
@@ -69,7 +76,8 @@ const isPlayableAudio = (urlStr, redirectsLeft = 5) => new Promise((resolve) => 
       const id3 = b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33
       const frame = b[0] === 0xff && (b[1] & 0xe0) === 0xe0
       const isHtml = b.slice(0, 6).toString().toLowerCase().startsWith('<html') || b.slice(0, 5).toString() === '<h2>x' || ct.includes('text/html')
-      resolve((isAudioCt || id3 || frame) && !isHtml)
+      const tooShort = total != null && total > 0 && total < MIN_AUDIO_BYTES
+      resolve((isAudioCt || id3 || frame) && !isHtml && !tooShort)
     }
     r.on('end', finish)
     r.on('close', finish)
@@ -312,17 +320,13 @@ app.post('/api/url', auth.requireAuth, wrap(async (req, res) => {
   // verified audio. This hides single-source timeouts/blocks (e.g. juhe's
   // occasional timeout is covered by lx finishing in parallel).
   const errors = []
-  let fallbackUrl = null
-  let fallbackSrc = null
   const winner = await new Promise((resolve) => {
     let pending = candidates.length
     candidates.forEach(src => {
-      // capture an unvalidated url as a last-resort fallback
       src.getMusicUrl(musicInfo.source, musicInfo, quality)
         .then(async (url) => {
-          if (!fallbackUrl) { fallbackUrl = url; fallbackSrc = src.id }
           if (!validate || await isPlayableAudio(url)) return resolve({ url, sourceScript: src.id })
-          throw new Error('non-audio/blocked')
+          throw new Error('non-audio/blocked/preview')
         })
         .catch(e => { errors.push(`${src.id}: ${e.message}`) })
         .finally(() => { if (--pending === 0) resolve(null) })
@@ -332,9 +336,8 @@ app.post('/api/url', auth.requireAuth, wrap(async (req, res) => {
   if (winner) {
     return res.json({ ...winner, validated: validate, proxied: `/api/proxy/audio?url=${encodeURIComponent(winner.url)}` })
   }
-  if (fallbackUrl) {
-    return res.json({ url: fallbackUrl, sourceScript: fallbackSrc, validated: false, warning: 'no source produced a verified-audio link', detail: errors, proxied: `/api/proxy/audio?url=${encodeURIComponent(fallbackUrl)}` })
-  }
+  // 不再回退到「未校验链接」——那往往就是 9 秒试听片段。宁可明确失败让客户端跳过，
+  // 也不把试听音当成整首歌反复播放。要排查时用 validate=0 单独取链查看。
   res.status(502).json({ error: 'all sources failed', detail: errors })
 }))
 

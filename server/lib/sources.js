@@ -12,6 +12,10 @@ const { MusicSource } = require('./sandbox')
 const DEFAULT_SOURCE_DIR = path.resolve(__dirname, '..', '..', 'lx-music-source-main')
 const SOURCE_DIR = process.env.LX_SOURCE_DIR || DEFAULT_SOURCE_DIR
 
+// 随仓库提交的内置源（server/sources-bundled/<id>/latest.js）。git pull 即部署，
+// 不依赖 LX_SOURCE_DIR / fetch-sources。聚合音源等可读、可维护的源放这里。
+const BUNDLED_SOURCE_DIR = path.resolve(__dirname, '..', 'sources-bundled')
+
 const INFO_KEYS = ['name', 'description', 'version', 'author', 'homepage']
 
 const parseHeader = (script) => {
@@ -30,26 +34,24 @@ const registry = new Map()
 // Preferred order for auto source selection (lower = tried first). Sources known
 // to return clean CDN audio go first; ones that often hit ISP P2P-blocking or
 // dead links go last. Override with LX_SOURCE_PRIORITY="juhe,lx,huibq".
-const DEFAULT_PRIORITY = (process.env.LX_SOURCE_PRIORITY || 'juhe,lx,grass,flower,huibq,sixyin,ikun').split(',').map(s => s.trim())
+const DEFAULT_PRIORITY = (process.env.LX_SOURCE_PRIORITY || 'qdyaggr,juhe,lx,grass,flower,huibq,sixyin,ikun').split(',').map(s => s.trim())
 const priorityOf = (id) => {
   const i = DEFAULT_PRIORITY.indexOf(id)
   return i === -1 ? 999 : i
 }
 
-const loadAll = () => {
-  registry.clear()
-  let dirents = []
+// 从一个目录加载所有 <id>/latest.js 源；同名 id 后加载的覆盖先加载的。
+const loadFromDir = (dir) => {
+  let dirents
   try {
-    dirents = fs.readdirSync(SOURCE_DIR, { withFileTypes: true })
+    dirents = fs.readdirSync(dir, { withFileTypes: true })
   } catch (e) {
-    console.error(`[sources] cannot read source dir ${SOURCE_DIR}: ${e.message}`)
-    return registry
+    return  // 目录不存在/不可读则跳过（内置目录或外部目录任一缺失都不致命）
   }
-
   for (const d of dirents) {
     if (!d.isDirectory()) continue
     const id = d.name
-    const file = path.join(SOURCE_DIR, id, 'latest.js')
+    const file = path.join(dir, id, 'latest.js')
     if (!fs.existsSync(file)) continue
     let script
     try {
@@ -68,6 +70,13 @@ const loadAll = () => {
       console.error(`[sources] load fail "${id}": ${e.message}`)
     }
   }
+}
+
+const loadAll = () => {
+  registry.clear()
+  loadFromDir(BUNDLED_SOURCE_DIR)   // 内置源（随仓库）
+  loadFromDir(SOURCE_DIR)           // 外部源（LX_SOURCE_DIR，可覆盖同名）
+  if (registry.size === 0) console.warn('[sources] no source scripts loaded')
   return registry
 }
 
