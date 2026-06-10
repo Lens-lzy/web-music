@@ -20,6 +20,7 @@ const store = require('./lib/store')
 const auth = require('./lib/auth')
 const charts = require('./lib/charts')
 const recommend = require('./lib/recommend')
+const news = require('./lib/news')
 
 // Built-in search/lyric/pic providers (ported from lx-music musicSdk).
 // Each key is a platform id; value is a module with search/getLyric/getPic.
@@ -234,6 +235,15 @@ app.get('/api/platforms', auth.requireAuth, (req, res) => res.json({ platforms: 
 
 // 精选首页：定时抓取的热门榜单卡片
 app.get('/api/featured', auth.requireAuth, (req, res) => res.json(charts.get()))
+
+// 音乐资讯：定时抓取的 RSS 资讯卡片（首页轮播用）。列表不含正文。
+app.get('/api/news', auth.requireAuth, (req, res) => res.json(news.get()))
+// 单条资讯详情（含正文 content）
+app.get('/api/news/:id', auth.requireAuth, (req, res) => {
+  const item = news.getOne(req.params.id)
+  if (!item) return res.status(404).json({ error: 'not found' })
+  res.json({ item })
+})
 
 // 记录一次播放（用于个性化推荐）
 app.post('/api/history', auth.requireAuth, wrap(async (req, res) => {
@@ -580,6 +590,7 @@ app.get('*', (req, res) => {
 // ---- start ----
 sources.loadAll()
 charts.start() // load cached charts + schedule periodic refresh
+news.start()   // load cached news + schedule periodic RSS refresh
 app.listen(PORT, HOST, () => {
   console.log(`\n  web-music server  →  http://${HOST}:${PORT}`)
   console.log(`  source dir: ${sources.SOURCE_DIR}`)

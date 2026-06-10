@@ -12,6 +12,12 @@ lx-music-source-main/
 data/
 *.secret
 
+# SSH/部署密钥，切勿提交
+githubkey
+githubkey.pub
+*.pem
+id_rsa*
+
 # 环境变量
 .env
 *.env
