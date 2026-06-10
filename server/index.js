@@ -387,14 +387,13 @@ app.get('/api/proxy/img', auth.requireAuth, (req, res) => {
   }
   // 内部跟随重定向（CDN 常 302 到别的域名）：只在原始 URL 上做白名单校验，
   // 后续 302 在服务端自己跟，不再回到 /api/proxy/img 重新校验（否则跳到陌生域名会 403）。
-  // ⚠️ 只给资讯图带 Referer（部分英文站防盗链需要）；国内音乐 CDN（酷狗等）对 Referer 敏感，带了反而被拒，故不带。
+  // ⚠️ 不带 Referer（与最初能正常显示封面的版本一致）：国内音乐 CDN 对 Referer 敏感，
+  // 英文资讯图实测不带 Referer 也能拉到（200）。只用 User-Agent 即可。
   const stream = (urlStr, redirectsLeft) => {
     let u
     try { u = new URL(urlStr) } catch (e) { if (!res.headersSent) res.status(400).end(); return }
     const lib = u.protocol === 'https:' ? https : http
-    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36' }
-    if (!isMusicCdn) headers.Referer = u.origin + '/'
-    const up = lib.request(u, { headers }, (r) => {
+    const up = lib.request(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36' } }, (r) => {
       if ([301, 302, 303, 307, 308].includes(r.statusCode) && r.headers.location) {
         r.resume()
         if (redirectsLeft <= 0) { if (!res.headersSent) res.status(502).end(); return }

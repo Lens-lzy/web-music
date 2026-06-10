@@ -8,7 +8,8 @@
 const { requestAsync } = require('./request')
 
 const DEFAULT_TARGET = process.env.PF_NEWS_TRANSLATE_LANG || 'zh-CN'
-const MAX_CHUNK = 1500
+// 块小一点更稳（更短的 q 不易被免费端点拒；且 <480 的块能用 MyMemory 兜底）
+const MAX_CHUNK = 450
 
 const googleOnce = async (text, target) => {
   const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=' +
@@ -46,21 +47,29 @@ const chunk = (text, max = MAX_CHUNK) => {
   return parts
 }
 
-// 翻译一段文本；可能较长会自动分块。失败返回原文。
-const translate = async (text, { target = DEFAULT_TARGET, allowMyMemory = false } = {}) => {
+const googleWithRetry = async (text, target) => {
+  try { return await googleOnce(text, target) }
+  catch (_) { return await googleOnce(text, target) } // 1 次重试
+}
+
+// 翻译一段文本；长文自动分块。**逐块兜底**：某块失败先重试、再 MyMemory（短块）、
+// 都不行就保留该块原文——避免「一块失败拖垮整段→整段回退英文」。
+const translate = async (text, { target = DEFAULT_TARGET } = {}) => {
   const t = (text || '').trim()
   if (!t) return text
-  try {
-    const parts = chunk(t)
-    const out = []
-    for (const p of parts) out.push(await googleOnce(p, target))
-    return out.join('')
-  } catch (_) {
-    if (allowMyMemory && t.length < 480) {
-      try { return await myMemoryOnce(t, target) } catch (__) {}
+  const parts = chunk(t)
+  const out = []
+  for (const p of parts) {
+    try {
+      out.push(await googleWithRetry(p, target))
+    } catch (_) {
+      if (p.length < 480) {
+        try { out.push(await myMemoryOnce(p, target)); continue } catch (__) {}
+      }
+      out.push(p) // 该块保留原文，不影响其它块
     }
-    return text // 优雅降级：保留原文
   }
+  return out.join('')
 }
 
 module.exports = { translate }

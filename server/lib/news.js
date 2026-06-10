@@ -226,6 +226,9 @@ const htmlToText = (html) => {
   return s.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n')
 }
 
+// 是否含中文（用来判断「翻译成功了没」：含中文＝译好；纯英文＝失败/未译）
+const hasCJK = (s) => /[一-鿿]/.test(s || '')
+
 // 简单并发池
 const mapPool = async (arr, n, fn) => {
   let i = 0
@@ -251,15 +254,17 @@ const refresh = async () => {
       const old = prev.get(it.id)
       if (old) { it.titleZh = old.titleZh; it.summaryZh = old.summaryZh; it.contentZh = old.contentZh }
     }
-    // 仅给「还没译过标题」的新条目翻 标题+摘要（短、即时显示在轮播/预览）
+    // 给「没翻过 或 缓存的还是英文（上次翻译失败）」的条目翻 标题+摘要。仅在结果含中文时才写入，
+    // 否则留 null 等下次重试——避免把失败的英文永久缓存。
     if (TRANSLATE) {
-      const todo = items.filter(it => it.titleZh == null)
+      const todo = items.filter(it => !hasCJK(it.titleZh))
       if (todo.length) {
         await mapPool(todo, 5, async (it) => {
-          it.titleZh = await translate(it.title, { allowMyMemory: true })
-          if (it.summary) it.summaryZh = await translate(it.summary, { allowMyMemory: true })
+          const t = await translate(it.title)
+          if (hasCJK(t)) it.titleZh = t
+          if (it.summary) { const s = await translate(it.summary); if (hasCJK(s)) it.summaryZh = s }
         })
-        console.log(`[news] translated ${todo.length} new items`)
+        console.log(`[news] translated ${todo.length} new/failed items`)
       }
     }
     if (items.length) {
@@ -274,13 +279,17 @@ const refresh = async () => {
   }
 }
 
-// 按需翻译正文（详情接口首次访问时调用，结果缓存到该条目）
+// 按需翻译正文（详情接口首次访问时调用，结果缓存到该条目）。
+// 若缓存里已是中文 / 已知无正文则跳过；若缓存的是英文（上次失败）则重试。
 const ensureContentTranslated = async (item) => {
-  if (!TRANSLATE || !item || item.contentZh != null) return
+  if (!TRANSLATE || !item) return
+  if (item.contentZh === '') return                       // 已知无正文
+  if (item.contentZh && hasCJK(item.contentZh)) return    // 已翻成中文
   let text = htmlToText(item.content || '')
   if (!text) { item.contentZh = ''; return }
-  if (text.length > 6000) text = text.slice(0, 6000) // 兜底封顶，控调用量/时延
-  item.contentZh = await translate(text)
+  if (text.length > 6000) text = text.slice(0, 6000)      // 兜底封顶，控调用量/时延
+  const zh = await translate(text)
+  if (hasCJK(zh)) item.contentZh = zh                     // 仅成功（含中文）才缓存，失败留待下次重试
 }
 
 // 列表：不含正文（content/contentZh 体积大，详情接口才给）
