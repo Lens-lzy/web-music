@@ -238,12 +238,13 @@ app.get('/api/featured', auth.requireAuth, (req, res) => res.json(charts.get()))
 
 // 音乐资讯：定时抓取的 RSS 资讯卡片（首页轮播用）。列表不含正文。
 app.get('/api/news', auth.requireAuth, (req, res) => res.json(news.get()))
-// 单条资讯详情（含正文 content）
-app.get('/api/news/:id', auth.requireAuth, (req, res) => {
+// 单条资讯详情（含正文 content；首次访问时按需翻译正文 contentZh）
+app.get('/api/news/:id', auth.requireAuth, wrap(async (req, res) => {
   const item = news.getOne(req.params.id)
   if (!item) return res.status(404).json({ error: 'not found' })
+  await news.ensureContentTranslated(item)
   res.json({ item })
-})
+}))
 
 // 记录一次播放（用于个性化推荐）
 app.post('/api/history', auth.requireAuth, wrap(async (req, res) => {
@@ -378,22 +379,35 @@ app.get('/api/proxy/img', auth.requireAuth, (req, res) => {
   if (!target) return res.status(400).send('url required')
   let urlObj
   try { urlObj = new URL(target) } catch (e) { return res.status(400).send('bad url') }
-  // only allow image hosts we expect, to avoid an open proxy
-  if (!/\.(kugou|kuwo|qq|music\.126|126|migu)\.(com|cn|net)$/i.test(urlObj.hostname) && !/kugou|kuwo|qpic|migu|126/i.test(urlObj.hostname)) {
+  // 白名单：国内音乐 CDN（封面） + 资讯源封面域名（news.js 动态放行）。避免开放代理。
+  const host = urlObj.hostname
+  const isMusicCdn = /\.(kugou|kuwo|qq|music\.126|126|migu)\.(com|cn|net)$/i.test(host) || /kugou|kuwo|qpic|migu|126/i.test(host)
+  if (!isMusicCdn && !news.allowsImageHost(host)) {
     return res.status(403).send('host not allowed')
   }
-  const lib = urlObj.protocol === 'https:' ? https : http
-  const up = lib.request(urlObj, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (r) => {
-    if ([301, 302, 307, 308].includes(r.statusCode) && r.headers.location) {
-      r.resume(); res.redirect('/api/proxy/img?token=' + encodeURIComponent(req.query.token || '') + '&url=' + encodeURIComponent(new URL(r.headers.location, urlObj).toString())); return
-    }
-    res.status(r.statusCode)
-    if (r.headers['content-type']) res.setHeader('content-type', r.headers['content-type'])
-    res.setHeader('cache-control', 'public, max-age=86400')
-    r.pipe(res)
-  })
-  up.on('error', () => { if (!res.headersSent) res.status(502).end() })
-  up.end()
+  // 内部跟随重定向（CDN 常 302 到别的域名）：只在原始 URL 上做白名单校验，
+  // 后续 302 在服务端自己跟，不再回到 /api/proxy/img 重新校验（否则跳到陌生域名会 403）。
+  const stream = (urlStr, redirectsLeft) => {
+    let u
+    try { u = new URL(urlStr) } catch (e) { if (!res.headersSent) res.status(400).end(); return }
+    const lib = u.protocol === 'https:' ? https : http
+    const up = lib.request(u, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36', Referer: u.origin + '/' } }, (r) => {
+      if ([301, 302, 303, 307, 308].includes(r.statusCode) && r.headers.location) {
+        r.resume()
+        if (redirectsLeft <= 0) { if (!res.headersSent) res.status(502).end(); return }
+        return stream(new URL(r.headers.location, u).toString(), redirectsLeft - 1)
+      }
+      res.status(r.statusCode)
+      if (r.headers['content-type']) res.setHeader('content-type', r.headers['content-type'])
+      if (r.headers['content-length']) res.setHeader('content-length', r.headers['content-length'])
+      res.setHeader('cache-control', 'public, max-age=86400')
+      r.pipe(res)
+    })
+    up.on('error', () => { if (!res.headersSent) res.status(502).end() })
+    req.on('close', () => up.destroy())
+    up.end()
+  }
+  stream(target, 5)
 })
 
 // ---- audio proxy (adds headers, relays Range for seeking) ----

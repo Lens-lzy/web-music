@@ -14,6 +14,10 @@ const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
 const { requestAsync } = require('./request')
+const { translate } = require('./translate')
+
+// 翻译开关：默认开（把英文资讯翻成中文）；设 PF_NEWS_TRANSLATE=0 关闭。
+const TRANSLATE = process.env.PF_NEWS_TRANSLATE !== '0'
 
 const DATA_DIR = process.env.WEB_MUSIC_DATA_DIR || path.resolve(__dirname, '..', '..', 'data')
 const CACHE_FILE = path.join(DATA_DIR, 'news.json')
@@ -214,10 +218,26 @@ const saveCache = () => {
   try { fs.writeFileSync(CACHE_FILE, JSON.stringify(cache)) } catch (_) {}
 }
 
+// HTML 正文 → 保留段落的纯文本（供翻译用）
+const htmlToText = (html) => {
+  let s = stripDangerousBlocks(decodeEntities(html || ''))
+  s = s.replace(/<(?:br|p|div|li|h[1-6]|tr|blockquote)[^>]*>/gi, '\n')
+  s = s.replace(/<[^>]+>/g, '')
+  return s.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n')
+}
+
+// 简单并发池
+const mapPool = async (arr, n, fn) => {
+  let i = 0
+  const worker = async () => { while (i < arr.length) { const idx = i++; await fn(arr[idx], idx) } }
+  await Promise.all(Array.from({ length: Math.min(n, arr.length) }, worker))
+}
+
 const refresh = async () => {
   if (refreshing) return
   refreshing = true
   try {
+    const prev = new Map(cache.items.map(it => [it.id, it])) // 旧译文按 id 复用
     const all = []
     for (const feed of FEEDS) all.push(...await fetchFeed(feed))
     // 去重（按 id）+ 按时间倒序 + 截断
@@ -226,6 +246,22 @@ const refresh = async () => {
       .filter(it => (seen.has(it.id) ? false : (seen.add(it.id), true)))
       .sort((a, b) => (b.pubDate || 0) - (a.pubDate || 0))
       .slice(0, NEWS_MAX)
+    // 复用上次的译文，避免重复翻译（把对 Google 的调用量压到「仅新条目」）
+    for (const it of items) {
+      const old = prev.get(it.id)
+      if (old) { it.titleZh = old.titleZh; it.summaryZh = old.summaryZh; it.contentZh = old.contentZh }
+    }
+    // 仅给「还没译过标题」的新条目翻 标题+摘要（短、即时显示在轮播/预览）
+    if (TRANSLATE) {
+      const todo = items.filter(it => it.titleZh == null)
+      if (todo.length) {
+        await mapPool(todo, 5, async (it) => {
+          it.titleZh = await translate(it.title, { allowMyMemory: true })
+          if (it.summary) it.summaryZh = await translate(it.summary, { allowMyMemory: true })
+        })
+        console.log(`[news] translated ${todo.length} new items`)
+      }
+    }
     if (items.length) {
       cache = { updatedAt: Date.now(), items }
       saveCache()
@@ -238,10 +274,30 @@ const refresh = async () => {
   }
 }
 
-// 列表：不含 content（正文体积大，详情接口才给）
-const get = () => ({ updatedAt: cache.updatedAt, items: cache.items.map(({ content, ...rest }) => rest) })
+// 按需翻译正文（详情接口首次访问时调用，结果缓存到该条目）
+const ensureContentTranslated = async (item) => {
+  if (!TRANSLATE || !item || item.contentZh != null) return
+  let text = htmlToText(item.content || '')
+  if (!text) { item.contentZh = ''; return }
+  if (text.length > 6000) text = text.slice(0, 6000) // 兜底封顶，控调用量/时延
+  item.contentZh = await translate(text)
+}
+
+// 列表：不含正文（content/contentZh 体积大，详情接口才给）
+const get = () => ({ updatedAt: cache.updatedAt, items: cache.items.map(({ content, contentZh, ...rest }) => rest) })
 // 详情：含 content
 const getOne = (id) => cache.items.find(it => it.id === id) || null
+
+// 图片代理白名单：只放行「当前资讯封面里出现过的图片域名」。
+// 这样图片代理能转发英文源的封面，又不变成任意 URL 的开放代理。
+const allowsImageHost = (host) => {
+  if (!host) return false
+  for (const it of cache.items) {
+    if (!it.cover) continue
+    try { if (new URL(it.cover).hostname === host) return true } catch (_) {}
+  }
+  return false
+}
 
 const start = () => {
   loadCache()
@@ -249,4 +305,4 @@ const start = () => {
   setInterval(refresh, REFRESH_MS)
 }
 
-module.exports = { start, get, getOne, refresh, parseFeed, FEEDS }
+module.exports = { start, get, getOne, refresh, ensureContentTranslated, parseFeed, allowsImageHost, FEEDS }
